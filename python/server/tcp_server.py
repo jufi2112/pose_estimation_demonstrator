@@ -67,7 +67,7 @@ class BodyPoseTcpServer:
     def _service_connection(self, key, mask, verbosity):
         sock = key.fileobj
         data = key.data
-        recv_data = sock.recv(660)
+        recv_data = sock.recv(672)
         if recv_data:
             if not data.producer:
                 # client is now a producer
