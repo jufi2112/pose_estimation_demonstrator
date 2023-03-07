@@ -43,14 +43,18 @@ class BodyPoseTcpClient:
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.sock.setblocking(False)
         if self.verbosity > 0:
-            print(f'Connecting to server at {server_addr}')
+            print(f'Connecting to server at {server_addr} ...', end=" ")
         self.sock.connect_ex(server_addr)
         events = selectors.EVENT_READ | selectors.EVENT_WRITE
         data = None
         self.sel.register(self.sock, events, data=data)
+        if self.verbosity > 0:
+            print("done")
 
 
     def run(self):
+        if self.is_producer and self.verbosity > 0:
+            print("Transmitting data")
         try:
             continue_connection = True
             poses_idx = 0
