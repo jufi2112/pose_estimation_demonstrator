@@ -27,7 +27,10 @@ public class TcpPuppeteer : MonoBehaviour
     public string m_tcpIP = "localhost";
     public int m_tcpPort = 7777;
     public bool m_connectAtStart = true;
+    [Tooltip("Body ID (4 byte) + translation (3 * 4 byte) + pose (165 * 4 byte) = 676 byte")]
     public int m_messageLengthBytes = 676;
+    [Tooltip("Time in seconds to wait for the TCP listener script to gracefully shut down. After this time has passed, Abort is called.")]
+    public int m_threadCloseGracePeriodSeconds = 3;
     [Tooltip("This allows to convert between the coordinate systems used for capturing and used in Unity. For each unity axis, provide the corresponding axis from the captured data, e.g. [0, 2, 1] will mean that the last axis of the capture coordinate system will be used as height in Unity.")]
     public Vector3Int m_translationElementOrder = new Vector3Int(0,2,1);
     #endregion
@@ -41,7 +44,12 @@ public class TcpPuppeteer : MonoBehaviour
     void OnDestroy()
     {
         m_stopThread = true;
-        m_clientReceiveThread.Join();
+        bool threadClosed = m_clientReceiveThread.Join(m_threadCloseGracePeriodSeconds * 1000);
+        if (!threadClosed)
+        {
+            Debug.Log("TCP listener thread had to be aborted");
+            m_clientReceiveThread.Abort();
+        }
     }
 
     // Update is called once per frame
@@ -50,6 +58,7 @@ public class TcpPuppeteer : MonoBehaviour
         // !!! IMPORTANT !!!
         // Convention: elements in arrays (e.g. float[]) will always be in the order as received from the server (e.g. height axis may not correspond to Unity's Y-axis)
         // Elements in Vectors (e.g. Vector3) will always have been converted to Unity's coordinate system using m_translationElementOrder
+        // Use ConvertProducerArrayToUnityVector to perform the conversion
         Dictionary<int, Dictionary<string, float[]>> buffer;
         lock (locker)
         {
@@ -69,11 +78,7 @@ public class TcpPuppeteer : MonoBehaviour
             {
                 float[] translBuffer = entry.Value["transl"];
                 // Vector from initial position to current position with respect to the streamed data
-                Vector3 translationDifferenceData = new Vector3(
-                    translBuffer[m_translationElementOrder[0]],
-                    translBuffer[m_translationElementOrder[1]],
-                    translBuffer[m_translationElementOrder[2]]
-                ) - m_initialBodyPositionsData[entry.Key];
+                Vector3 translationDifferenceData = ConvertProducerArrayToUnityVector<float>(translBuffer) - m_initialBodyPositionsData[entry.Key];
                 foreach (TcpControlledBody sub in subscribers)
                 {
                     sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
@@ -152,12 +157,7 @@ public class TcpPuppeteer : MonoBehaviour
                         (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
                         if (!m_initialBodyPositionsData.ContainsKey(bodyID))
                         {
-                            m_initialBodyPositionsData[bodyID] = new Vector3(
-                                transl[m_translationElementOrder[0]],
-                                transl[m_translationElementOrder[1]],
-                                transl[m_translationElementOrder[2]]
-                            );
-                            Debug.Log("Body ID " + bodyID + " initial translation: " + m_initialBodyPositionsData[bodyID]);
+                            m_initialBodyPositionsData[bodyID] = ConvertProducerArrayToUnityVector<float>(transl);
                         }
                         lock (locker)
                         {
@@ -257,5 +257,18 @@ public class TcpPuppeteer : MonoBehaviour
             }
         }
         return true;
+    }
+
+    /// <summary>
+    /// Converts the given array to a Unity Vector3. It follows the conversion that while the array is expected to be in the producer's coordinate system,
+    /// the Vector3 will be in Unity's coordinate system.
+    /// </summary>
+    private Vector3 ConvertProducerArrayToUnityVector<T>(T[] producerArray)
+    {
+        return new Vector3(
+            (float)(object) producerArray[m_translationElementOrder[0]],
+            (float)(object) producerArray[m_translationElementOrder[1]],
+            (float)(object) producerArray[m_translationElementOrder[2]]
+        );
     }
 }

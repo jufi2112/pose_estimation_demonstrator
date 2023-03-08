@@ -14,8 +14,8 @@ public class TcpControlledBody : MonoBehaviour
     #region public members
     public int m_interestedBodyID = 1;
     public bool m_connectOnStart = true;
-    [Tooltip("Rotation that should be applied to the body immediately before the first pose is applied.")]
-    public Vector3 m_initialRotationEulerAngles = new Vector3(-90, 0, 0);
+    [Tooltip("Rotation that should be applied to the body immediately before the first pose is applied. Order in which the rotations are applied is specified by order in the list.")]
+    public List<Vector3> m_initialRotationEulerAngles = new List<Vector3>{new Vector3(-90, 0, 0)};
     [Tooltip("Translation that should be applied to the body immediately before the first pose is applied.")]
     public Vector3 m_initialTranslation = new Vector3(0, -0.42f, 0.3f);
     #endregion
@@ -46,7 +46,8 @@ public class TcpControlledBody : MonoBehaviour
     {
         if (!m_setupComplete)
         {
-            gameObject.transform.Rotate(m_initialRotationEulerAngles);
+            foreach (Vector3 rotation in m_initialRotationEulerAngles)
+                gameObject.transform.Rotate(rotation);
             gameObject.transform.position += m_initialTranslation;
             m_initialPosition = gameObject.transform.position;
             m_setupComplete = true;

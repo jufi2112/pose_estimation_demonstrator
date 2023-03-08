@@ -7,6 +7,7 @@ using System.Threading;
 using System.Runtime.InteropServices;
 using UnityEngine;
 
+[Obsolete("Use TcpControlledBody instead")]
 public class TcpPoseClient : MonoBehaviour
 {
     // from https://gist.github.com/danielbierwirth/0636650b005834204cb19ef5ae6ccedb
