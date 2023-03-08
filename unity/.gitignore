@@ -1,11 +1,16 @@
-SMPL-X\ Pose\ Estimation\ Demonstrator
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Prefabs
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Prefabs.meta
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Scripts
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Scripts.meta
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX.meta
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Prefabs
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Prefabs.meta
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Scripts
-!SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Scripts.meta
-!SMPL-X\ Pose\ Estimation\ Demonstrator/.gitignore
+SMPL-X\ Pose\ Estimation\ Demonstrator/*
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/
+
+/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/*
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Prefabs/
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Prefabs.meta
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Scripts/
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/Scripts.meta
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX.meta
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/
+
+/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/*
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Prefabs/
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Prefabs.meta
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Scripts/
+!/SMPL-X\ Pose\ Estimation\ Demonstrator/Assets/SMPLX/Scripts.meta
