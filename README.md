@@ -8,7 +8,7 @@
 4. Download the Unity SMPL-X Prediction project from [here](https://cloudstore.zih.tu-dresden.de/index.php/s/WgLDJDDwzk6pK3E) and extract it into the `pose_estimation_demonstrator/unity/` subdirectory.
     - Merge the directories if prompted
     - Note: The `.zip` file contains files that are too large to upload to GitHub (e.g. the Unity scenes)
-5. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose)
+5. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose/readme.md)
 
 ## Usage
 1. Start the server:
