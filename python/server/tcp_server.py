@@ -63,18 +63,15 @@ class BodyPoseTcpServer:
         conn.setblocking(False)
         self.clients[conn] = {'addr': addr, 'body_id': 0}
         self.consumers.append(conn)
-        # Send initial transmissions to socket
-        # if self.send_initial_transmissions:
-        #     self._send_initial_transmissions(sock)
         data = types.SimpleNamespace(addr=addr, producer=False,
                                      recv_init_transm=not self.send_initial_transmissions)
+        # Whenever a new client connects, we want to send the first transmissions
+        # of all active producers to this client, so that the client can correctly
+        # calculate the position difference that it has to apply to its base position
         if self.send_initial_transmissions:
             events = selectors.EVENT_WRITE
-            print("Registering EVENT_WRITE")
         else:
             events = selectors.EVENT_READ
-        # data = types.SimpleNamespace(addr=addr, producer=False)
-        # events = selectors.EVENT_READ #| selectors.EVENT_WRITE
         self.sel.register(conn, events, data=data)
 
 
@@ -83,9 +80,7 @@ class BodyPoseTcpServer:
         data = key.data
         if mask & selectors.EVENT_WRITE:
             if not data.recv_init_transm and self.send_initial_transmissions:
-                print("Sending initial transmissions")
                 self._send_initial_transmissions(sock)
-                print("Finished sending initial transmissions")
                 data.recv_init_transm = True
             else:
                 if verbosity > 0:
@@ -126,6 +121,8 @@ class BodyPoseTcpServer:
                     self.consumers.remove(sock)
                 except ValueError:
                     pass
+                if data.producer:
+                    del self.first_transmissions[self.clients[sock]['body_id']]
                 del self.clients[sock]
                 sock.close()
 
@@ -141,7 +138,6 @@ class BodyPoseTcpServer:
 
     def _send_initial_transmissions(self, sock):
         for body_id, msg in self.first_transmissions.items():
-            print(f"Sending initial transmission for body ID {body_id}")
             data_to_transmit = int(body_id).to_bytes(4, 'big') + msg
             sock.sendall(data_to_transmit)
 
