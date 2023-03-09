@@ -11,18 +11,22 @@ class BodyPoseTcpClient:
     """Loosely based on this article: https://realpython.com/python-sockets/"""
     def __init__(self, host, port, is_producer, npz_file = None,
                  poses_attribute = None, transl_attribute = None,
-                 target_fps = -1, loop = True, verbosity = 1):
+                 capture_fps_attribute = None, target_fps = -1,
+                 capture_fps = -1, drop_frames = False, loop = True,
+                 verbosity = 1):
         self.host = host
         self.port = port
         self.is_producer = is_producer
         self.poses = None
         self.transl = None
         self.verbosity = verbosity
+        mocap_fps = None
         if self.is_producer and npz_file:
-            self.poses, self.transl = self._load_npz_attributes(
+            self.poses, self.transl, mocap_fps = self._load_npz_attributes(
                 npz_file,
                 poses_attribute,
-                transl_attribute
+                transl_attribute,
+                capture_fps_attribute
             )
             if self.poses is None or self.transl is None:
                 if self.verbosity > 0:
@@ -32,6 +36,19 @@ class BodyPoseTcpClient:
         if self.target_fps == 0:
             raise ValueError(f"Invalid target fps: {self.target_fps}")
         self.time_to_sleep = 1 / self.target_fps
+        self.capture_fps = mocap_fps if capture_fps == -1 else capture_fps
+        if drop_frames and self.capture_fps is None:
+            raise ValueError(
+                "Could not infer motion capture fps from .npz file via "
+                f" the {capture_fps_attribute} attribute. Unable to determine "
+                "number of frames that have to be dropped to match target "
+                f"frame rate of {target_fps} fps. Try providing the capture "
+                "fps via the --capture-fps option."
+            )
+        if drop_frames and self.capture_fps < 1:
+            raise ValueError(f"Invalid capture fps: {self.capture_fps}")
+        self.frames_to_advance = int(self.capture_fps / self.target_fps) \
+            if drop_frames else 1
         self.loop = loop
         self.sock = None
         self.sel = None
@@ -87,7 +104,7 @@ class BodyPoseTcpClient:
                         break
                     if isinstance(status, float):
                         time_last_transmission = status
-                poses_idx += 1
+                poses_idx += self.frames_to_advance
         except KeyboardInterrupt:
             if self.verbosity > 0:
                 print("Closing connection")
@@ -132,17 +149,19 @@ class BodyPoseTcpClient:
             return time.perf_counter()
 
 
-    def _load_npz_attributes(self, npz_file, pose_attribute, transl_attribute):
+    def _load_npz_attributes(self, npz_file, pose_attribute, transl_attribute,
+                             capture_fps_attribute):
         if not osp.isfile(npz_file):
-            return None, None
+            return None, None, None
         content = np.load(npz_file)
         if not pose_attribute in list(content.keys()):
-            return None, None
+            return None, None, None
         if not transl_attribute in list(content.keys()):
-            return None, None
+            return None, None, None
         return (
             content[pose_attribute].astype(np.float32),
-            content[transl_attribute].astype(np.float32)
+            content[transl_attribute].astype(np.float32),
+            content.get(capture_fps_attribute, default=None)
         )
 
 
@@ -164,9 +183,23 @@ if __name__ == '__main__':
     parser.add_argument('--transl-field', type=str, default="trans",
                         help="<Optional> Name of the npz field that contains "
                         "the translations to broadcast. Defaults to 'trans'.")
-    parser.add_argument('-f', '--fps', type=float, default=30,
+    parser.add_argument('--mocap-fps-field', type=str, default="mocap_frame_rate",
+                        help="<Optional> Name of the field that holds the "
+                        "capture frame rate value. Defaults to 'mocap_frame_rate'")
+    parser.add_argument('-f', '--fps', type=float, default=120,
                         help="<Optional> FPS to broadcast the poses with "
-                        "should the client act as a producer. Defaults to 30")
+                        "should the client act as a producer. Defaults to 120")
+    parser.add_argument('--capture-fps', type=int, default=-1,
+                        help="<Optional> Framerate with which the data was "
+                        "captured. This will overwrite the value provided by "
+                        "the --mocap-fps-field information. Defaults to -1 "
+                        "(inactive).")
+    parser.add_argument('--drop-frames', action="store_true",
+                        help="If the target replay framerate (--fps option) "
+                        "does not match the capture framerate, this flag "
+                        "specifies that frames should be dropped in order to "
+                        "match the target framerate. Requires that the "
+                        "capturing framerate is known.")
     parser.add_argument('--noloop', action='store_true', help="If specified, "
                         "the poses will only be broadcasted once.")
     parser.add_argument('-v', '--verbosity', type=int, default=1,
@@ -174,7 +207,9 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     client = BodyPoseTcpClient(args.host, args.port, args.producer, args.data,
-                               args.poses_field, args.transl_field, args.fps,
+                               args.poses_field, args.transl_field,
+                               args.mocap_fps_field, args.fps,
+                               args.capture_fps, args.drop_frames,
                                not args.noloop, args.verbosity
     )
     client.connect()
