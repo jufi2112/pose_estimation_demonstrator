@@ -5,12 +5,11 @@
 1. Clone this repository and its submodules using `git clone --recurse-submodules https://github.com/jufi2112/pose_estimation_demonstrator`
 2. `cd pose_estimation_demonstrator`
 3. `git submodules update --force --init --remote --recursive`
-4. Download the Unity SMPL-X Prediction project from [here](https://cloudstore.zih.tu-dresden.de/index.php/s/cBEstNYb8AkqKEP) and extract it into the `pose_estimation_demonstrator/unity/` subdirectory.
-    - Merge the directories if prompted
-    - Since some scenes of our demonstrator contain 3D scans of our offices, we withhold these assets.
-        - If you are associated with 6G-life and want to use the demonstrator with the 3D scans, write a mail to Julien Fischer
-    - Note: The `.zip` file contains files that are too large to upload to GitHub
-5. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose/readme.md)
+4. Download the SMPL-X Unity Package from [here](https://smpl-x.is.tue.mpg.de/index.html) and put the extracted `SMPLX-Unity/Assets/SMPLX` folder into `unity/SMPL-X Pose Estimation Demonstrator/Assets`
+    - If you don't already have an account, you have to create one and accept the license agreement
+5. Some scenes of our demonstrator contain 3D scans of our offices, which we withhold at the moment
+    - If you are associated with 6G-life and want to use the demonstrator with the 3D scans, write an email to Julien Fischer
+6. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose/readme.md)
 
 ## Usage
 1. Start the server:
@@ -27,3 +26,8 @@
     - For now, you have to use the scene view in order to move the camera during playback
 4. In `pose_estimation_demonstrator/pose_estimation/rgb-kinect-pose/src` run `./run_server.sh -c 10`
     - The pose estimation will take some time to start, even though it already produces output to the command line
+
+# Used Software
+We're using the following Unity packages inside of the demonstrator:
+- SMPL-X Unity Package [link](https://smpl-x.is.tue.mpg.de/index.html)
+- Pcx - Point Cloud Importer/Renderer for Unity [link](https://github.com/keijiro/Pcx)

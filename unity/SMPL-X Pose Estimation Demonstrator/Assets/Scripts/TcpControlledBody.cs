@@ -17,6 +17,8 @@ public class TcpControlledBody : MonoBehaviour
     private Matrix4x4 m_homRotMat = Matrix4x4.identity;
     // Keeps track of the game object's rotation so that we can react to it being changed
     private Vector3 m_rotationLastFrame = new Vector3();
+    // see https://github.com/vchoutas/smplx/blob/566532a4636d9336403073884dbdd9722833d425/smplx/joint_names.py#L19
+    string[] smplxJointNames = new string[] { "pelvis","left_hip","right_hip","spine1","left_knee","right_knee","spine2","left_ankle","right_ankle","spine3", "left_foot","right_foot","neck","left_collar","right_collar","head","left_shoulder","right_shoulder","left_elbow", "right_elbow","left_wrist","right_wrist","jaw","left_eye_smplhf","right_eye_smplhf","left_index1","left_index2","left_index3","left_middle1","left_middle2","left_middle3","left_pinky1","left_pinky2","left_pinky3","left_ring1","left_ring2","left_ring3","left_thumb1","left_thumb2","left_thumb3","right_index1","right_index2","right_index3","right_middle1","right_middle2","right_middle3","right_pinky1","right_pinky2","right_pinky3","right_ring1","right_ring2","right_ring3","right_thumb1","right_thumb2","right_thumb3" };
     #endregion
 
     #region public members
@@ -83,8 +85,7 @@ public class TcpControlledBody : MonoBehaviour
         Vector4 homPositionDiff = new Vector4(positionDifferenceData.x, positionDifferenceData.y, positionDifferenceData.z, 1.0f);
         Vector3 rotatedPosDiff = m_homRotMat * homPositionDiff;
         gameObject.transform.position = m_initialPosition + rotatedPosDiff;
-        //bodyPose[1] += (m_rootRotationOffsetY * Mathf.Deg2Rad);
-        m_smplxScript.SetBodyPose(bodyPose);
+        bool status = SetBodyPose(bodyPose);
     }
 
     public bool RegisterAtPuppeteer()
@@ -117,5 +118,30 @@ public class TcpControlledBody : MonoBehaviour
     private float DetermineAngularDifferenceY()
     {
         return m_smplxDefaultRotationY - gameObject.transform.localRotation.eulerAngles.y;
+    }
+
+    private bool SetBodyPose(float[] pose)
+    {
+        if (m_smplxScript == null)
+        {
+            return false;
+        }
+        if (pose.Length != 165)
+        {
+            Debug.Log("Could not set body pose: The given array does not have 165 elements!");
+            return false;
+        }
+        for (int i = 0; i < 55; ++i)
+        {
+            string jointName = smplxJointNames[i];
+            float rodX = pose[i*3 + 0];
+            float rodY = pose[i*3 + 1];
+            float rodZ = pose[i*3 + 2];
+            Quaternion quat = SMPLX.QuatFromRodrigues(rodX, rodY, rodZ);
+            m_smplxScript.SetLocalJointRotation(jointName, quat);
+        }
+        m_smplxScript.UpdatePoseCorrectives();
+        m_smplxScript.UpdateJointPositions(true);
+        return true;
     }
 }

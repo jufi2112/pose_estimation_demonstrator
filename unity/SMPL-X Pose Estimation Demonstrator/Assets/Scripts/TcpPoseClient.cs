@@ -57,7 +57,7 @@ public class TcpPoseClient : MonoBehaviour
                 m_initialPositionBody = gameObject.transform.position;
                 m_bodyTransformSetUp = true;
             }
-            m_smplxScript.SetBodyPose(bodyPoseBuffer);
+            //m_smplxScript.SetBodyPose(bodyPoseBuffer);
             m_lastBodyPose = bodyPoseBuffer;
         }
         if (!ArraysEqual<float>(bodyTranslationBuffer, m_bodyLastTranslation))
