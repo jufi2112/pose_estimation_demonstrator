@@ -282,8 +282,16 @@ PrefabInstance:
     m_TransformParent: {fileID: 0}
     m_Modifications:
     - target: {fileID: 822017285856838969, guid: 985ce5005eb772e02b6232a2813a6b7d, type: 3}
+      propertyPath: m_freeCamera
+      value: 
+      objectReference: {fileID: 1563511894}
+    - target: {fileID: 822017285856838969, guid: 985ce5005eb772e02b6232a2813a6b7d, type: 3}
       propertyPath: m_interestedBodyID
-      value: 14
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 822017285856838969, guid: 985ce5005eb772e02b6232a2813a6b7d, type: 3}
+      propertyPath: m_belongsToLocalPlayer
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 4648870353421602968, guid: 985ce5005eb772e02b6232a2813a6b7d, type: 3}
       propertyPath: m_Name
@@ -412,8 +420,8 @@ GameObject:
   - component: {fileID: 1563511894}
   - component: {fileID: 1563511893}
   m_Layer: 0
-  m_Name: Main Camera
-  m_TagString: MainCamera
+  m_Name: Free_Camera
+  m_TagString: Free_Camera
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
@@ -425,7 +433,7 @@ AudioListener:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1563511892}
-  m_Enabled: 1
+  m_Enabled: 0
 --- !u!20 &1563511894
 Camera:
   m_ObjectHideFlags: 0

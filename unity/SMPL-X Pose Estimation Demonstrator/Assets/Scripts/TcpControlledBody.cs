@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using UnityEngine.InputSystem;
 using UnityEngine;
 
 public class TcpControlledBody : MonoBehaviour
@@ -19,11 +20,16 @@ public class TcpControlledBody : MonoBehaviour
     private Vector3 m_rotationLastFrame = new Vector3();
     // see https://github.com/vchoutas/smplx/blob/566532a4636d9336403073884dbdd9722833d425/smplx/joint_names.py#L19
     string[] smplxJointNames = new string[] { "pelvis","left_hip","right_hip","spine1","left_knee","right_knee","spine2","left_ankle","right_ankle","spine3", "left_foot","right_foot","neck","left_collar","right_collar","head","left_shoulder","right_shoulder","left_elbow", "right_elbow","left_wrist","right_wrist","jaw","left_eye_smplhf","right_eye_smplhf","left_index1","left_index2","left_index3","left_middle1","left_middle2","left_middle3","left_pinky1","left_pinky2","left_pinky3","left_ring1","left_ring2","left_ring3","left_thumb1","left_thumb2","left_thumb3","right_index1","right_index2","right_index3","right_middle1","right_middle2","right_middle3","right_pinky1","right_pinky2","right_pinky3","right_ring1","right_ring2","right_ring3","right_thumb1","right_thumb2","right_thumb3" };
+    private Camera m_povCam = null;
     #endregion
 
     #region public members
     public int m_interestedBodyID = 1;
     public bool m_connectOnStart = true;
+    [Tooltip("Whether this body instance should be controlled by the local player")]
+    public bool m_belongsToLocalPlayer = false;
+    [Tooltip("Camera that should be used for free view")]
+    public Camera m_freeCamera = null;
     [Tooltip("Rotation that should be applied to the body immediately before the first pose is applied. Order in which the rotations are applied is specified by order in the list.")]
     public List<Vector3> m_initialRotationEulerAngles = new List<Vector3>{new Vector3(-90, 0, 0)};
     [Tooltip("Translation that should be applied to the body immediately before the first pose is applied. This is to align the body with the ground")]
@@ -34,6 +40,31 @@ public class TcpControlledBody : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        if (m_belongsToLocalPlayer)
+        {
+            Transform parent = transform;
+            GetChildObjectWithTag(parent, "PoV_Camera");
+            if (m_povCam == null)
+            {
+                Debug.Log("Could not find a valid PoV Camera for " + gameObject.name);
+                if (m_freeCamera != null)
+                {
+                    m_freeCamera.gameObject.SetActive(true);
+                }
+                else
+                {
+                    Debug.Log("Found no suitable camera");
+                }
+            }
+            else
+            {
+                m_povCam.gameObject.SetActive(true);
+                if (m_freeCamera != null)
+                {
+                    m_freeCamera.gameObject.SetActive(false);
+                }
+            }
+        }
         // Angles are measured counter-clockwise
         m_bodyRootAngularDifferenceY = DetermineAngularDifferenceY();
 
@@ -143,5 +174,35 @@ public class TcpControlledBody : MonoBehaviour
         m_smplxScript.UpdatePoseCorrectives();
         m_smplxScript.UpdateJointPositions(true);
         return true;
+    }
+
+    private bool GetChildObjectWithTag(Transform parent, string tag)
+    {
+        for (int i = 0; i < parent.childCount; ++i)
+        {
+            Transform child = parent.GetChild(i);
+            if (child.tag == tag)
+            {
+                m_povCam = child.gameObject.GetComponent<Camera>();
+                return true;
+            }
+            if (child.childCount > 0)
+            {
+                if (GetChildObjectWithTag(child, tag))
+                {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    public void OnSwitch_Camera()
+    {
+        if (m_povCam != null && m_freeCamera != null)
+        {
+            m_povCam.gameObject.SetActive(!m_povCam.gameObject.activeSelf);
+            m_freeCamera.gameObject.SetActive(!m_freeCamera.gameObject.activeSelf);
+        }
     }
 }

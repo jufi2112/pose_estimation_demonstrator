@@ -5,6 +5,8 @@ TagManager:
   serializedVersion: 2
   tags:
   - TCP_Puppeteer
+  - PoV_Camera
+  - Free_Camera
   layers:
   - Default
   - TransparentFX
