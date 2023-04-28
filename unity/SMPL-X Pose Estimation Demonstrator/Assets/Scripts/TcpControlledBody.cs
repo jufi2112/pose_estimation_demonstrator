@@ -21,6 +21,10 @@ public class TcpControlledBody : MonoBehaviour
     // see https://github.com/vchoutas/smplx/blob/566532a4636d9336403073884dbdd9722833d425/smplx/joint_names.py#L19
     string[] smplxJointNames = new string[] { "pelvis","left_hip","right_hip","spine1","left_knee","right_knee","spine2","left_ankle","right_ankle","spine3", "left_foot","right_foot","neck","left_collar","right_collar","head","left_shoulder","right_shoulder","left_elbow", "right_elbow","left_wrist","right_wrist","jaw","left_eye_smplhf","right_eye_smplhf","left_index1","left_index2","left_index3","left_middle1","left_middle2","left_middle3","left_pinky1","left_pinky2","left_pinky3","left_ring1","left_ring2","left_ring3","left_thumb1","left_thumb2","left_thumb3","right_index1","right_index2","right_index3","right_middle1","right_middle2","right_middle3","right_pinky1","right_pinky2","right_pinky3","right_ring1","right_ring2","right_ring3","right_thumb1","right_thumb2","right_thumb3" };
     private Camera m_povCam = null;
+    private Vector3 m_freeCamMoveDirection = new Vector3(0, 0, 0);
+    private Vector2 m_freeCamRotateDirection = new Vector2(0, 0);
+    private bool b_mouseControlled = true;
+    private PlayerInput m_playerInput = null;
     #endregion
 
     #region public members
@@ -30,6 +34,10 @@ public class TcpControlledBody : MonoBehaviour
     public bool m_belongsToLocalPlayer = false;
     [Tooltip("Camera that should be used for free view")]
     public Camera m_freeCamera = null;
+    [Tooltip("Free view camera movement speed")]
+    public float m_freeCamMoveSpeed = 10.0f;
+    [Tooltip("Free view camera rotation speed")]
+    public float m_freeCamRotationSpeed = 1.0f;
     [Tooltip("Rotation that should be applied to the body immediately before the first pose is applied. Order in which the rotations are applied is specified by order in the list.")]
     public List<Vector3> m_initialRotationEulerAngles = new List<Vector3>{new Vector3(-90, 0, 0)};
     [Tooltip("Translation that should be applied to the body immediately before the first pose is applied. This is to align the body with the ground")]
@@ -40,8 +48,22 @@ public class TcpControlledBody : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {
+        Cursor.lockState = CursorLockMode.Locked;
         if (m_belongsToLocalPlayer)
         {
+            m_playerInput = gameObject.GetComponent<PlayerInput>();
+            if (m_freeCamera == null)
+            {
+                GameObject[] freeViewCams = GameObject.FindGameObjectsWithTag("Free_Camera");
+                if (freeViewCams.Length > 0)
+                {
+                    m_freeCamera = freeViewCams[0].gameObject.GetComponent<Camera>();
+                }
+                else
+                {
+                    Debug.Log("No free view camera reference specified for " + gameObject.name + " and could not find a free view camera in the scene.");
+                }
+            }
             Transform parent = transform;
             GetChildObjectWithTag(parent, "PoV_Camera");
             if (m_povCam == null)
@@ -78,6 +100,7 @@ public class TcpControlledBody : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        Debug.Log("Update Called");
         if (m_setupComplete)
         {
             if (gameObject.transform.localRotation.eulerAngles != m_rotationLastFrame)
@@ -87,6 +110,19 @@ public class TcpControlledBody : MonoBehaviour
                 m_homRotMat = BuildHomogeneousRotationMatrixY(m_bodyRootAngularDifferenceY);
                 m_rotationLastFrame = gameObject.transform.localRotation.eulerAngles;
             }
+        }
+        if (m_freeCamera != null && m_freeCamera.gameObject.activeSelf)
+        {
+            // if (m_playerInput)
+            // {
+            //     Debug.Log(m_playerInput.actions["Rotate_Camera"].ReadValue<Vector2>());
+            // }
+            m_freeCamera.gameObject.transform.Translate(m_freeCamMoveDirection * m_freeCamMoveSpeed * Time.deltaTime);
+            float dt = b_mouseControlled ? 1f : Time.deltaTime;
+            m_freeCamera.gameObject.transform.Rotate(new Vector3(m_freeCamRotateDirection.y, m_freeCamRotateDirection.x, 0.0f) * m_freeCamRotationSpeed * dt);
+            Transform freeCamTransform = m_freeCamera.gameObject.transform;
+            //Debug.Log(freeCamTransform.rotation.eulerAngles.y);
+            freeCamTransform.rotation = Quaternion.Euler(ClampCamXRotation(freeCamTransform.rotation.eulerAngles.x, 85f, -85f), freeCamTransform.rotation.eulerAngles.y, 0.0f);
         }
     }
 
@@ -197,6 +233,28 @@ public class TcpControlledBody : MonoBehaviour
         return false;
     }
 
+    private float ClampCamXRotation(float eulerAngle, float maxDownAngle=90f, float maxUpAngle=-90f)
+    {
+        // X upwards angle is negative -1 -> 359
+        maxUpAngle = PositiveMod(maxUpAngle, 360);
+        maxDownAngle = PositiveMod(maxDownAngle, 360);
+        eulerAngle = PositiveMod(eulerAngle, 360);
+        if (eulerAngle > maxDownAngle && eulerAngle < maxUpAngle)
+        {
+            if ((eulerAngle - maxDownAngle) <= (maxUpAngle - eulerAngle))
+                // closer to max down angle
+                eulerAngle = maxDownAngle;
+            else
+                eulerAngle = maxUpAngle;
+        }
+        return eulerAngle;
+    }
+
+    private float PositiveMod(float x, float m)
+    {
+        return (x%m + m) % m;
+    }
+
     public void OnSwitch_Camera()
     {
         if (m_povCam != null && m_freeCamera != null)
@@ -204,5 +262,21 @@ public class TcpControlledBody : MonoBehaviour
             m_povCam.gameObject.SetActive(!m_povCam.gameObject.activeSelf);
             m_freeCamera.gameObject.SetActive(!m_freeCamera.gameObject.activeSelf);
         }
+    }
+
+    public void OnMove_Camera(InputValue value)
+    {
+        m_freeCamMoveDirection = value.Get<Vector3>();
+    }
+
+    public void OnRotate_Camera(InputValue value)
+    {
+        Debug.Log("OnRotate Called");
+        m_freeCamRotateDirection = value.Get<Vector2>();
+    }
+
+    public void OnControlsChanged(PlayerInput input)
+    {
+        b_mouseControlled = input.currentControlScheme.Equals("Keyboard & Mouse");
     }
 }
