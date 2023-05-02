@@ -1,26 +1,36 @@
 import socket
 import time
+from datetime import datetime
 from os import path as osp
 import os
 import numpy as np
 import argparse
 import selectors
 import types
+import sys
 
 class BodyPoseTcpClient:
     """Loosely based on this article: https://realpython.com/python-sockets/"""
-    def __init__(self, host, port, is_producer, npz_file = None,
-                 poses_attribute = None, transl_attribute = None,
-                 capture_fps_attribute = None, target_fps = -1,
-                 capture_fps = -1, drop_frames = False, loop = True,
-                 verbosity = 1):
+    def __init__(self, host, port, record, record_dir, bodies_to_record,
+                 is_producer, npz_file = None, poses_attribute = None,
+                 transl_attribute = None, capture_fps_attribute = None,
+                 target_fps = -1, capture_fps = -1, drop_frames = False,
+                 loop = True, verbosity = 1):
         self.host = host
         self.port = port
         self.is_producer = is_producer
+        self.record = record
+        self.record_dir = record_dir if record_dir != None else os.getcwd()
+        self.bodies_to_record = bodies_to_record
         self.poses = None
         self.transl = None
         self.verbosity = verbosity
+        self.recordings = {}
         mocap_fps = None
+        if self.is_producer and self.record:
+            raise ValueError(
+                "The client cannot record and be a producer at the same time!"
+            )
         if self.is_producer and npz_file:
             self.poses, self.transl, mocap_fps = self._load_npz_attributes(
                 npz_file,
@@ -72,6 +82,8 @@ class BodyPoseTcpClient:
     def run(self):
         if self.is_producer and self.verbosity > 0:
             print("Transmitting data")
+        if self.record and self.verbosity > 0:
+            print("Recording data")
         try:
             continue_connection = True
             poses_idx = 0
@@ -88,6 +100,7 @@ class BodyPoseTcpClient:
                             break
                         poses_idx = 0
                     current_pose = self.poses[poses_idx]
+                    #current_pose[0] += np.deg2rad(90)
                     current_transl = self.transl[poses_idx]
                     data_to_transmit = np.concatenate(
                         (current_transl, current_pose),
@@ -112,6 +125,20 @@ class BodyPoseTcpClient:
             self.sel.unregister(self.sock)
             self.sock.close()
             self.sel.close()
+            if self.record:
+                fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                fpath = osp.join(self.record_dir, fname) + '.npz'
+                if self.verbosity > 0:
+                    print(f"Saving recordings to {fpath}...", end=' ')
+                rec_dir = {}
+                for body_id in list(self.recordings.keys()):
+                    rec_dir[f'{body_id}_poses'] = np.stack(self.recordings[body_id]['poses'])
+                    rec_dir[f'{body_id}_transl'] = np.stack(self.recordings[body_id]['transl'])
+                    del self.recordings[body_id]
+                with open(fpath, 'wb') as file:
+                    np.savez(file, **rec_dir)
+                if self.verbosity > 0:
+                    print('done')
 
 
     def service_connection(self, key, mask, data_to_transmit,
@@ -127,9 +154,19 @@ class BodyPoseTcpClient:
             body_id = int.from_bytes(recv_data[:4], 'big')
             transl = np.frombuffer(recv_data[4:16], dtype=np.float32)
             pose = np.frombuffer(recv_data[16:], dtype=np.float32)
-            if self.verbosity > 0:
+            if self.verbosity > 1:
                 print(f"Body index {body_id} | Translation: {transl} | "
                       f"Pose shape: {pose.shape} | First 6 elements: {pose[:6]}")
+            if self.record:
+                if self.bodies_to_record is None or body_id in self.bodies_to_record:
+                    if body_id not in list(self.recordings.keys()):
+                        self.recordings[body_id] = {
+                            'pose': [pose],
+                            'transl': [transl]
+                        }
+                    else:
+                        self.recordings[body_id]['pose'].append(pose)
+                        self.recordings[body_id]['transl'].append(transl)
             return True
         if mask & selectors.EVENT_WRITE:
             if not self.is_producer:
@@ -172,6 +209,14 @@ if __name__ == '__main__':
                         "localhost")
     parser.add_argument('-p', '--port', type=int, default=7777,
                         help="<Optional> Port to connect to. Defaults to 7777")
+    parser.add_argument('--record', action='store_true', help="Defines that "
+                        "this client should record all transmitted information."
+                        " Does not work if the client is a producer.")
+    parser.add_argument('-o', '--output', type=str, default=None,
+                        help="<Optional> Directory to where the recording "
+                        "should be saved to. Defaults to None (cwd)")
+    parser.add_argument('-b', '--bodies-to-record', nargs='*', help="<Optional>"
+                        " Body IDs to record. Defaults to recording all")
     parser.add_argument('--producer', action='store_true', help="Defines that "
                         "this client is going to be a producer")
     parser.add_argument('-d', '--data', type=str, default=None,
@@ -205,12 +250,15 @@ if __name__ == '__main__':
     parser.add_argument('-v', '--verbosity', type=int, default=1,
                         help="<Optional> Verbosity setting. Defaults to 1")
     args = parser.parse_args()
+    bodies_to_record = None
+    if args.bodies_to_record is not None:
+        bodies_to_record = [int(x) for x in args.bodies_to_record]
 
-    client = BodyPoseTcpClient(args.host, args.port, args.producer, args.data,
+    client = BodyPoseTcpClient(args.host, args.port, args.record, args.output,
+                               bodies_to_record, args.producer, args.data,
                                args.poses_field, args.transl_field,
-                               args.mocap_fps_field, args.fps,
-                               args.capture_fps, args.drop_frames,
-                               not args.noloop, args.verbosity
+                               args.mocap_fps_field, args.fps, args.capture_fps,
+                               args.drop_frames, not args.noloop, args.verbosity
     )
     client.connect()
     client.run()

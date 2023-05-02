@@ -7,9 +7,12 @@
 3. `git submodules update --force --init --remote --recursive`
 4. Download the SMPL-X Unity Package from [here](https://smpl-x.is.tue.mpg.de/index.html) and put the extracted `SMPLX-Unity/Assets/SMPLX` folder into `unity/SMPL-X Pose Estimation Demonstrator/Assets`
     - If you don't already have an account, you have to create one and accept the license agreement
-5. Some scenes of our demonstrator contain 3D scans of our offices, which we withhold at the moment
+5. Download the `Pcx - Point Cloud Importer/Renderer for Unity` from [here](https://cloudstore.zih.tu-dresden.de/index.php/s/Kj8pyHJDjH5HENb)
+    - Extract the file to `pose_estimation_demonstrator/unity/SMPL-X Pose Estimation Demonstrator/Packages`
+    - This is a slightly modified version of the original `Pcx` addon by Keijiro Takahashi which can be found [here](https://github.com/keijiro/Pcx)
+6. Some scenes of our demonstrator contain 3D scans of our offices, which we withhold at the moment
     - If you are associated with 6G-life and want to use the demonstrator with the 3D scans, write an email to Julien Fischer
-6. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose/readme.md)
+7. Follow the setup instructions in the `rgbd-kinect-pose` repository provided [here](./pose_estimation/rgb-kinect-pose/readme.md)
 
 ## Usage
 1. Start the server:
