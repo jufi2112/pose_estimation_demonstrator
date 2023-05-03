@@ -31,8 +31,6 @@ public class TcpPuppeteer : MonoBehaviour
     public int m_messageLengthBytes = 676;
     [Tooltip("Time in seconds to wait for the TCP listener script to gracefully shut down. After this time has passed, Abort is called.")]
     public int m_threadCloseGracePeriodSeconds = 3;
-    [Tooltip("This allows to convert between the coordinate systems used for capturing and used in Unity. For each unity axis, provide the corresponding axis from the captured data, e.g. [0, 2, 1] will mean that the last axis of the capture coordinate system will be used as height in Unity.")]
-    public Vector3Int m_translationElementOrder = new Vector3Int(0,2,1);
     #endregion
     // Start is called before the first frame update
     void Start()
@@ -55,10 +53,6 @@ public class TcpPuppeteer : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        // !!! IMPORTANT !!!
-        // Convention: elements in arrays (e.g. float[]) will always be in the order as received from the server (e.g. height axis may not correspond to Unity's Y-axis)
-        // Elements in Vectors (e.g. Vector3) will always have been converted to Unity's coordinate system using m_translationElementOrder
-        // Use ConvertProducerArrayToUnityVector to perform the conversion
         Dictionary<int, Dictionary<string, float[]>> buffer;
         lock (locker)
         {
@@ -76,9 +70,8 @@ public class TcpPuppeteer : MonoBehaviour
             List<TcpControlledBody> subscribers;
             if (m_registeredBodies.TryGetValue(entry.Key, out subscribers))
             {
-                float[] translBuffer = entry.Value["transl"];
                 // Vector from initial position to current position with respect to the streamed data
-                Vector3 translationDifferenceData = ConvertProducerArrayToUnityVector<float>(translBuffer) - m_initialBodyPositionsData[entry.Key];
+                Vector3 translationDifferenceData = new Vector3(entry.Value["transl"][0], entry.Value["transl"][1], entry.Value["transl"][2]) - m_initialBodyPositionsData[entry.Key];
                 foreach (TcpControlledBody sub in subscribers)
                 {
                     sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
@@ -157,7 +150,7 @@ public class TcpPuppeteer : MonoBehaviour
                         (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
                         if (!m_initialBodyPositionsData.ContainsKey(bodyID))
                         {
-                            m_initialBodyPositionsData[bodyID] = ConvertProducerArrayToUnityVector<float>(transl);
+                            m_initialBodyPositionsData[bodyID] = new Vector3(transl[0], transl[1], transl[2]);
                         }
                         lock (locker)
                         {
@@ -257,18 +250,5 @@ public class TcpPuppeteer : MonoBehaviour
             }
         }
         return true;
-    }
-
-    /// <summary>
-    /// Converts the given array to a Unity Vector3. It follows the conversion that while the array is expected to be in the producer's coordinate system,
-    /// the Vector3 will be in Unity's coordinate system.
-    /// </summary>
-    private Vector3 ConvertProducerArrayToUnityVector<T>(T[] producerArray)
-    {
-        return new Vector3(
-            (float)(object) producerArray[m_translationElementOrder[0]],
-            (float)(object) producerArray[m_translationElementOrder[1]],
-            (float)(object) producerArray[m_translationElementOrder[2]]
-        );
     }
 }

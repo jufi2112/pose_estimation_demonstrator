@@ -100,7 +100,6 @@ public class TcpControlledBody : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-        Debug.Log("Update Called");
         if (m_setupComplete)
         {
             if (gameObject.transform.localRotation.eulerAngles != m_rotationLastFrame)
@@ -113,15 +112,10 @@ public class TcpControlledBody : MonoBehaviour
         }
         if (m_freeCamera != null && m_freeCamera.gameObject.activeSelf)
         {
-            // if (m_playerInput)
-            // {
-            //     Debug.Log(m_playerInput.actions["Rotate_Camera"].ReadValue<Vector2>());
-            // }
             m_freeCamera.gameObject.transform.Translate(m_freeCamMoveDirection * m_freeCamMoveSpeed * Time.deltaTime);
             float dt = b_mouseControlled ? 1f : Time.deltaTime;
             m_freeCamera.gameObject.transform.Rotate(new Vector3(m_freeCamRotateDirection.y, m_freeCamRotateDirection.x, 0.0f) * m_freeCamRotationSpeed * dt);
             Transform freeCamTransform = m_freeCamera.gameObject.transform;
-            //Debug.Log(freeCamTransform.rotation.eulerAngles.y);
             freeCamTransform.rotation = Quaternion.Euler(ClampCamXRotation(freeCamTransform.rotation.eulerAngles.x, 85f, -85f), freeCamTransform.rotation.eulerAngles.y, 0.0f);
         }
     }
@@ -271,7 +265,6 @@ public class TcpControlledBody : MonoBehaviour
 
     public void OnRotate_Camera(InputValue value)
     {
-        Debug.Log("OnRotate Called");
         m_freeCamRotateDirection = value.Get<Vector2>();
     }
 

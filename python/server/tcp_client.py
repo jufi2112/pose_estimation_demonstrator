@@ -4,6 +4,7 @@ from datetime import datetime
 from os import path as osp
 import os
 import numpy as np
+import quaternion
 import argparse
 import selectors
 import types
@@ -12,13 +13,15 @@ import sys
 class BodyPoseTcpClient:
     """Loosely based on this article: https://realpython.com/python-sockets/"""
     def __init__(self, host, port, record, record_dir, bodies_to_record,
-                 is_producer, npz_file = None, poses_attribute = None,
+                 is_producer, angle, npz_file = None, poses_attribute = None,
                  transl_attribute = None, capture_fps_attribute = None,
                  target_fps = -1, capture_fps = -1, drop_frames = False,
                  loop = True, verbosity = 1):
         self.host = host
         self.port = port
         self.is_producer = is_producer
+        # to transform from given coordinate system to unity
+        self.x_rot_angle = angle
         self.record = record
         self.record_dir = record_dir if record_dir != None else os.getcwd()
         self.bodies_to_record = bodies_to_record
@@ -38,6 +41,11 @@ class BodyPoseTcpClient:
                 transl_attribute,
                 capture_fps_attribute
             )
+            # Transform poses and translation to Unity's coordinate system
+            if self.poses is not None:
+                self._add_x_angle_offset_to_poses()
+            if self.transl is not None:
+                self._swap_translation_axis()
             if self.poses is None or self.transl is None:
                 if self.verbosity > 0:
                     print("Defaulting to sending 1 and 0 poses.")
@@ -100,7 +108,6 @@ class BodyPoseTcpClient:
                             break
                         poses_idx = 0
                     current_pose = self.poses[poses_idx]
-                    #current_pose[0] += np.deg2rad(90)
                     current_transl = self.transl[poses_idx]
                     data_to_transmit = np.concatenate(
                         (current_transl, current_pose),
@@ -202,6 +209,26 @@ class BodyPoseTcpClient:
         )
 
 
+    def _add_x_angle_offset_to_poses(self):
+        """alternatively, see https://math.stackexchange.com/questions/382760/composition-of-two-axis-angle-rotations"""
+        quats = quaternion.from_rotation_vector(self.poses[:, :3])
+        rotX = quaternion.from_rotation_vector(np.asarray([1,0,0]) * np.deg2rad(self.x_rot_angle))
+        self.poses[:, :3] = quaternion.as_rotation_vector(rotX * quats)
+
+
+    def _swap_translation_axis(self):
+        swap_yz_mat = np.asarray(
+                    [
+                        [1,0,0],
+                        [0,0,1],
+                        [0,1,0]
+                    ],
+                    dtype=np.float32
+                )
+        # swap y and z Axis to conform to Unity's coordinate system
+        self.transl = np.einsum('ij,kj->ki', swap_yz_mat, self.transl)
+        
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="TCP Client")
     parser.add_argument('--host', type=str, default="localhost",
@@ -222,6 +249,11 @@ if __name__ == '__main__':
     parser.add_argument('-d', '--data', type=str, default=None,
                         help="<Optional> Path to a .npz file that contains the "
                         "poses that should be broadcasted. Defaults to None")
+    parser.add_argument('-a', '--angle', type=float, default=-90,
+                        help="<Optional> Angle (in deg) by which the global "
+                        "orientation should be rotated around the x-Axis in "
+                        "order to match Unity's default rotation. Defaults to "
+                        "-90°")
     parser.add_argument('--poses-field', type=str, default="poses",
                         help="<Optional> Name of the npz field that contains "
                         "the poses to broadcast. Defaults to 'poses'.")
@@ -255,8 +287,8 @@ if __name__ == '__main__':
         bodies_to_record = [int(x) for x in args.bodies_to_record]
 
     client = BodyPoseTcpClient(args.host, args.port, args.record, args.output,
-                               bodies_to_record, args.producer, args.data,
-                               args.poses_field, args.transl_field,
+                               bodies_to_record, args.producer, args.angle,
+                               args.data, args.poses_field, args.transl_field,
                                args.mocap_fps_field, args.fps, args.capture_fps,
                                args.drop_frames, not args.noloop, args.verbosity
     )
