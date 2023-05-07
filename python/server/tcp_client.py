@@ -13,15 +13,17 @@ import sys
 class BodyPoseTcpClient:
     """Loosely based on this article: https://realpython.com/python-sockets/"""
     def __init__(self, host, port, record, record_dir, bodies_to_record,
-                 is_producer, angle, npz_file = None, poses_attribute = None,
-                 transl_attribute = None, capture_fps_attribute = None,
-                 target_fps = -1, capture_fps = -1, drop_frames = False,
-                 loop = True, verbosity = 1):
+                 is_producer, angle, keep_yz_axes, npz_file = None,
+                 poses_attribute = None, transl_attribute = None,
+                 capture_fps_attribute = None, target_fps = -1,
+                 capture_fps = -1, drop_frames = False, loop = True,
+                 verbosity = 1):
         self.host = host
         self.port = port
         self.is_producer = is_producer
         # to transform from given coordinate system to unity
         self.x_rot_angle = angle
+        self.keep_yz_axes = keep_yz_axes
         self.record = record
         self.record_dir = record_dir if record_dir != None else os.getcwd()
         self.bodies_to_record = bodies_to_record
@@ -29,6 +31,8 @@ class BodyPoseTcpClient:
         self.transl = None
         self.verbosity = verbosity
         self.recordings = {}
+        self.recording_time_start = -1
+        self.time_last_frame = 0
         mocap_fps = None
         if self.is_producer and self.record:
             raise ValueError(
@@ -41,19 +45,15 @@ class BodyPoseTcpClient:
                 transl_attribute,
                 capture_fps_attribute
             )
-            # Transform poses and translation to Unity's coordinate system
+            # Transform poses and translation to SMPL-X's coordinate system
             if self.poses is not None:
                 self._add_x_angle_offset_to_poses()
-            if self.transl is not None:
-                self._swap_translation_axis()
+            if self.transl is not None and not self.keep_yz_axes:
+                self.transl = self._swap_translation_yz_axes(self.transl)
             if self.poses is None or self.transl is None:
                 if self.verbosity > 0:
                     print("Defaulting to sending 1 and 0 poses.")
         self.transmit_ones = True
-        self.target_fps = target_fps
-        if self.target_fps == 0:
-            raise ValueError(f"Invalid target fps: {self.target_fps}")
-        self.time_to_sleep = 1 / self.target_fps
         self.capture_fps = mocap_fps if capture_fps == -1 else capture_fps
         if drop_frames and self.capture_fps is None:
             raise ValueError(
@@ -65,6 +65,13 @@ class BodyPoseTcpClient:
             )
         if drop_frames and self.capture_fps < 1:
             raise ValueError(f"Invalid capture fps: {self.capture_fps}")
+        self.target_fps = target_fps if target_fps != -1 else self.capture_fps
+        if self.target_fps == 0:
+            raise ValueError(f"Invalid target fps: {self.target_fps}")
+        if self.is_producer:
+            self.time_to_sleep = 1 / self.target_fps
+        else:
+            self.time_to_sleep = 0
         self.frames_to_advance = int(self.capture_fps / self.target_fps) \
             if drop_frames else 1
         self.loop = loop
@@ -133,19 +140,7 @@ class BodyPoseTcpClient:
             self.sock.close()
             self.sel.close()
             if self.record:
-                fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                fpath = osp.join(self.record_dir, fname) + '.npz'
-                if self.verbosity > 0:
-                    print(f"Saving recordings to {fpath}...", end=' ')
-                rec_dir = {}
-                for body_id in list(self.recordings.keys()):
-                    rec_dir[f'{body_id}_poses'] = np.stack(self.recordings[body_id]['poses'])
-                    rec_dir[f'{body_id}_transl'] = np.stack(self.recordings[body_id]['transl'])
-                    del self.recordings[body_id]
-                with open(fpath, 'wb') as file:
-                    np.savez(file, **rec_dir)
-                if self.verbosity > 0:
-                    print('done')
+                self._save_recording()
 
 
     def service_connection(self, key, mask, data_to_transmit,
@@ -166,14 +161,18 @@ class BodyPoseTcpClient:
                       f"Pose shape: {pose.shape} | First 6 elements: {pose[:6]}")
             if self.record:
                 if self.bodies_to_record is None or body_id in self.bodies_to_record:
+                    curr_time = time.perf_counter()
                     if body_id not in list(self.recordings.keys()):
                         self.recordings[body_id] = {
-                            'pose': [pose],
-                            'transl': [transl]
+                            'poses': [pose],
+                            'transl': [transl],
+                            'time_first_frame': curr_time,
+                            'time_last_frame': curr_time
                         }
                     else:
-                        self.recordings[body_id]['pose'].append(pose)
+                        self.recordings[body_id]['poses'].append(pose)
                         self.recordings[body_id]['transl'].append(transl)
+                        self.recordings[body_id]['time_last_frame'] = curr_time
             return True
         if mask & selectors.EVENT_WRITE:
             if not self.is_producer:
@@ -186,6 +185,7 @@ class BodyPoseTcpClient:
                 self.transmit_ones = not self.transmit_ones
             to_sleep = self.time_to_sleep - (time.perf_counter() - time_last_transmission)
             if to_sleep > 0:
+                #print(f"Sleeping for {to_sleep} seconds")
                 time.sleep(to_sleep)
             if self.verbosity > 1:
                 print(f"Sending {to_transmit.shape} of size {len(to_transmit.tobytes())}")
@@ -216,17 +216,43 @@ class BodyPoseTcpClient:
         self.poses[:, :3] = quaternion.as_rotation_vector(rotX * quats)
 
 
-    def _swap_translation_axis(self):
-        swap_yz_mat = np.asarray(
-                    [
-                        [1,0,0],
-                        [0,0,1],
-                        [0,1,0]
-                    ],
-                    dtype=np.float32
+    def _save_recording(self):
+        fname = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        fpath = osp.join(self.record_dir, fname) + '.npz'
+        if self.verbosity > 0:
+            print(f"Saving recordings to {fpath}...", end=' ')
+        rec_dir = {}
+        for body_id in list(self.recordings.keys()):
+            rec_dir[f'{body_id}_poses'] = np.stack(self.recordings[body_id]['poses'])
+            rec_dir[f'{body_id}_transl'] = np.stack(self.recordings[body_id]['transl'])
+            rec_dir[f'{body_id}_mocap_frame_rate'] = int(
+                rec_dir[f'{body_id}_poses'].shape[0] / (
+                    self.recordings[body_id]['time_last_frame'] -
+                    self.recordings[body_id]['time_first_frame'] + 1e-7
                 )
-        # swap y and z Axis to conform to Unity's coordinate system
-        self.transl = np.einsum('ij,kj->ki', swap_yz_mat, self.transl)
+            )
+            del self.recordings[body_id]
+        with open(fpath, 'wb') as file:
+            np.savez(file, **rec_dir)
+        if self.verbosity > 0:
+            print('done')
+
+
+    def _swap_translation_yz_axes(self, arr):
+        if len(arr.shape) == 1:
+            arr = arr[np.newaxis, ...]
+        return arr[:, [0,2,1]]
+        # Deprecated
+        # swap_yz_mat = np.asarray(
+        #             [
+        #                 [1,0,0],
+        #                 [0,0,1],
+        #                 [0,1,0]
+        #             ],
+        #             dtype=np.float32
+        #         )
+        # # swap y and z Axis to conform to Unity's coordinate system
+        # return np.einsum('ij,kj->ki', swap_yz_mat, arr)
         
 
 if __name__ == '__main__':
@@ -254,6 +280,8 @@ if __name__ == '__main__':
                         "orientation should be rotated around the x-Axis in "
                         "order to match Unity's default rotation. Defaults to "
                         "-90°")
+    parser.add_argument('--keep-yz-axes', action='store_true', help="<Optional>"
+                        ". If specified, y and z Axes will not be swapped.")
     parser.add_argument('--poses-field', type=str, default="poses",
                         help="<Optional> Name of the npz field that contains "
                         "the poses to broadcast. Defaults to 'poses'.")
@@ -263,9 +291,10 @@ if __name__ == '__main__':
     parser.add_argument('--mocap-fps-field', type=str, default="mocap_frame_rate",
                         help="<Optional> Name of the field that holds the "
                         "capture frame rate value. Defaults to 'mocap_frame_rate'")
-    parser.add_argument('-f', '--fps', type=float, default=120,
+    parser.add_argument('-f', '--fps', type=float, default=-1,
                         help="<Optional> FPS to broadcast the poses with "
-                        "should the client act as a producer. Defaults to 120")
+                        "should the client act as a producer. Defaults to -1 "
+                        "(= use mocap frame rate)")
     parser.add_argument('--capture-fps', type=int, default=-1,
                         help="<Optional> Framerate with which the data was "
                         "captured. This will overwrite the value provided by "
@@ -288,9 +317,10 @@ if __name__ == '__main__':
 
     client = BodyPoseTcpClient(args.host, args.port, args.record, args.output,
                                bodies_to_record, args.producer, args.angle,
-                               args.data, args.poses_field, args.transl_field,
-                               args.mocap_fps_field, args.fps, args.capture_fps,
-                               args.drop_frames, not args.noloop, args.verbosity
+                               args.keep_yz_axes, args.data, args.poses_field,
+                               args.transl_field, args.mocap_fps_field,
+                               args.fps, args.capture_fps, args.drop_frames,
+                               not args.noloop, args.verbosity
     )
     client.connect()
     client.run()
