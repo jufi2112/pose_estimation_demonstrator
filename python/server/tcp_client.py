@@ -225,12 +225,13 @@ class BodyPoseTcpClient:
         for body_id in list(self.recordings.keys()):
             rec_dir[f'{body_id}_poses'] = np.stack(self.recordings[body_id]['poses'])
             rec_dir[f'{body_id}_transl'] = np.stack(self.recordings[body_id]['transl'])
-            rec_dir[f'{body_id}_mocap_frame_rate'] = int(
-                rec_dir[f'{body_id}_poses'].shape[0] / (
-                    self.recordings[body_id]['time_last_frame'] -
-                    self.recordings[body_id]['time_first_frame'] + 1e-7
+            time_elapsed = self.recordings[body_id]['time_last_frame'] - self.recordings[body_id]['time_first_frame']
+            if time_elapsed <= 0:
+                rec_dir[f'{body_id}_frame_rate'] = -1
+            else:
+                rec_dir[f'{body_id}_frame_rate'] = int(
+                    rec_dir[f'{body_id}_poses'].shape[0] / time_elapsed
                 )
-            )
             del self.recordings[body_id]
         with open(fpath, 'wb') as file:
             np.savez(file, **rec_dir)
