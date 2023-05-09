@@ -1,5 +1,7 @@
 # Pose Estimation Demonstrator
 
+Tested with Unity 2021.3.19f1 on Windows 11 and Ubuntu 22.04
+
 ## Setup
 
 1. Clone this repository and its submodules using `git clone --recurse-submodules https://github.com/jufi2112/pose_estimation_demonstrator`
