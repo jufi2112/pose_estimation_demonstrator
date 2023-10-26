@@ -6,7 +6,7 @@ Tested with Unity 2021.3.19f1 on Windows 11 and Ubuntu 22.04
 
 1. Clone this repository and its submodules using `git clone --recurse-submodules https://github.com/jufi2112/pose_estimation_demonstrator`
 2. `cd pose_estimation_demonstrator`
-3. `git submodules update --force --init --remote --recursive`
+3. `git submodule update --force --init --remote --recursive`
 4. Download the SMPL-X Unity Package from [here](https://smpl-x.is.tue.mpg.de/index.html) and put the extracted `SMPLX-Unity/Assets/SMPLX` folder into `unity/SMPL-X Pose Estimation Demonstrator/Assets`
     - If you don't already have an account, you have to create one and accept the license agreement
 5. Download the `Pcx - Point Cloud Importer/Renderer for Unity` from [here](https://cloudstore.zih.tu-dresden.de/index.php/s/Kj8pyHJDjH5HENb)
