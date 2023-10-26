@@ -49,6 +49,8 @@ public class TcpControlledBody : MonoBehaviour
     void Start()
     {
         Cursor.lockState = CursorLockMode.Locked;
+        Transform parent = transform;
+        FindAndAssignPOVCameraByTag(parent, "PoV_Camera");
         if (m_belongsToLocalPlayer)
         {
             m_playerInput = gameObject.GetComponent<PlayerInput>();
@@ -64,8 +66,6 @@ public class TcpControlledBody : MonoBehaviour
                     Debug.Log("No free view camera reference specified for " + gameObject.name + " and could not find a free view camera in the scene.");
                 }
             }
-            Transform parent = transform;
-            GetChildObjectWithTag(parent, "PoV_Camera");
             if (m_povCam == null)
             {
                 Debug.Log("Could not find a valid PoV Camera for " + gameObject.name);
@@ -87,14 +87,32 @@ public class TcpControlledBody : MonoBehaviour
                 }
             }
         }
+        else
+        {
+            if (m_povCam != null)
+            {
+                m_povCam.gameObject.SetActive(false);
+            }
+        }
         // Angles are measured counter-clockwise
         m_bodyRootAngularDifferenceY = DetermineAngularDifferenceY();
 
         m_smplxScript = gameObject.GetComponent<SMPLX>();
         // register at "puppeteer" to receive translation and pose updates for the specific body ID
-        m_tcpPuppeteerScript = GameObject.FindGameObjectWithTag("TCP_Puppeteer").GetComponent<TcpPuppeteer>();
-        if (m_connectOnStart)
-            RegisterAtPuppeteer();
+        GameObject obj = GameObject.FindWithTag("TCP_Puppeteer");
+        if (obj != null)
+        {
+            m_tcpPuppeteerScript = obj.GetComponent<TcpPuppeteer>();
+        }
+        if (m_tcpPuppeteerScript is null)
+        {
+            Debug.Log(gameObject.name + " could not find a valid TCPPuppeteer instance.");
+        }
+        else
+        {
+            if (m_connectOnStart)
+                RegisterAtPuppeteer();
+        }
     }
 
     // Update is called once per frame
@@ -122,9 +140,12 @@ public class TcpControlledBody : MonoBehaviour
 
     void OnDestroy()
     {
-        bool unregisterSuccess = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
-        if (!unregisterSuccess)
-            Debug.Log("Could not unregister from the puppeteer");
+        if (m_tcpPuppeteerScript != null)
+        {
+            bool unregisterSuccess = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
+            if (!unregisterSuccess)
+                Debug.Log("Could not unregister from the puppeteer");
+        }
     }
 
     public void SetParameters(Vector3 positionDifferenceData, float[] bodyPose)
@@ -206,7 +227,7 @@ public class TcpControlledBody : MonoBehaviour
         return true;
     }
 
-    private bool GetChildObjectWithTag(Transform parent, string tag)
+    private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)
     {
         for (int i = 0; i < parent.childCount; ++i)
         {
@@ -218,7 +239,7 @@ public class TcpControlledBody : MonoBehaviour
             }
             if (child.childCount > 0)
             {
-                if (GetChildObjectWithTag(child, tag))
+                if (FindAndAssignPOVCameraByTag(child, tag))
                 {
                     return true;
                 }
@@ -270,6 +291,9 @@ public class TcpControlledBody : MonoBehaviour
 
     public void OnControlsChanged(PlayerInput input)
     {
-        b_mouseControlled = input.currentControlScheme.Equals("Keyboard & Mouse");
+        if (m_belongsToLocalPlayer)
+        {
+            b_mouseControlled = input.currentControlScheme.Equals("Keyboard & Mouse");
+        }
     }
 }
