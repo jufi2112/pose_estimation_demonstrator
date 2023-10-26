@@ -77,6 +77,7 @@ class BodyPoseTcpClient:
         self.loop = loop
         self.sock = None
         self.sel = None
+        self.time_last_transmission = None
 
 
     def connect(self):
@@ -153,6 +154,12 @@ class BodyPoseTcpClient:
                 return False
             if self.is_producer:
                 return True
+            time_now = time.perf_counter()
+            if self.time_last_transmission is not None and self.verbosity > 0:
+                T = time_now - self.time_last_transmission
+                f = 1 / T
+                print(f"Receiving data with {f:.0f} Hz     ", end="\r", flush=True)
+            self.time_last_transmission = time_now
             body_id = int.from_bytes(recv_data[:4], 'big')
             transl = np.frombuffer(recv_data[4:16], dtype=np.float32)
             pose = np.frombuffer(recv_data[16:], dtype=np.float32)
@@ -183,13 +190,25 @@ class BodyPoseTcpClient:
                 if self.transmit_ones:
                     to_transmit += 1
                 self.transmit_ones = not self.transmit_ones
-            to_sleep = self.time_to_sleep - (time.perf_counter() - time_last_transmission)
-            if to_sleep > 0:
-                #print(f"Sleeping for {to_sleep} seconds")
-                time.sleep(to_sleep)
+            # to_sleep = self.time_to_sleep - (time.perf_counter() - time_last_transmission)
+            # if to_sleep > 0:
+            #     #print(f"Sleeping for {to_sleep} seconds")
+            #     time.sleep(to_sleep)
             if self.verbosity > 1:
                 print(f"Sending {to_transmit.shape} of size {len(to_transmit.tobytes())}")
+            if self.time_last_transmission is not None:
+                while True:
+                    time_now = time.perf_counter()
+                    if (time_now - self.time_last_transmission) >= self.time_to_sleep:
+                        break
+            else:
+                time_now = time.perf_counter()
             self.sock.sendall(to_transmit.tobytes())
+            if self.time_last_transmission is not None and self.verbosity > 0:
+                T = time_now - self.time_last_transmission
+                f = 1 / T
+                print(f"Sending data with {f:.0f} Hz     ", end="\r", flush=True)
+            self.time_last_transmission = time_now
             return time.perf_counter()
 
 

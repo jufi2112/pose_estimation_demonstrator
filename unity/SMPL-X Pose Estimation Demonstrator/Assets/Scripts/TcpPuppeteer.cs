@@ -5,32 +5,47 @@ using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Runtime.InteropServices;
+using System.Diagnostics;
 using UnityEngine;
+using Debug = UnityEngine.Debug;
 
 public class TcpPuppeteer : MonoBehaviour
 {
     #region private members
     private TcpClient m_socketConnection = null;
     private Thread m_clientReceiveThread = null;
-    private System.Object locker = new System.Object();
+    // lock to be used when accessing m_nextBodyInformation
+    private readonly System.Object locker_nextBodyInformation = new System.Object();
+    // lock to be used when accessing m_initialBodyPositionsData
+    private readonly System.Object locker_initialBodyPositionData = new System.Object();
+    // lock to be used when accessing m_transmissionFrequency
+    private readonly System.Object locker_transmissionTimers = new System.Object();
     // dict that stores for each body ID the interested body instances
     Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
     // dict that stores for each body ID the initial position of the data
-    volatile Dictionary<int, Vector3> m_initialBodyPositionsData = new Dictionary<int, Vector3>();
+    Dictionary<int, Vector3> m_initialBodyPositionsData = new Dictionary<int, Vector3>();
     // dict to store updated translation and pose information for each body ID, updated by TCP thread and read by main thread
     Dictionary<int, Dictionary<string, float[]>> m_nextBodyInformation = new Dictionary<int, Dictionary<string, float[]>>();
     Dictionary<int, Dictionary<string, float[]>> m_appliedBodyInformation = new Dictionary<int, Dictionary<string, float[]>>();
+    // Dict that stores stopwatch instances that measure the transmission period for each body ID
+    Dictionary<int, Stopwatch> m_transmissionStopwatches = new Dictionary<int, Stopwatch>();
+    // Dict that stores the transmission frequency for each body ID
+    Dictionary<int, int> m_transmissionFrequency = new Dictionary<int, int>();
     volatile bool m_stopThread = false;
     #endregion
 
     #region public members
+    [Tooltip("IP address of the TCP server to which the client should connect.")]
     public string m_tcpIP = "localhost";
+    [Tooltip("Port of the TCP server to which the client should connect.")]
     public int m_tcpPort = 7777;
     public bool m_connectAtStart = true;
-    [Tooltip("Body ID (4 byte) + translation (3 * 4 byte) + pose (165 * 4 byte) = 676 byte")]
+    [Tooltip("Body ID (4 bytes) + translation (3 * 4 bytes) + pose (165 * 4 bytes) = 676 bytes.")]
     public int m_messageLengthBytes = 676;
     [Tooltip("Time in seconds to wait for the TCP listener script to gracefully shut down. After this time has passed, Abort is called.")]
     public int m_threadCloseGracePeriodSeconds = 3;
+    [Tooltip("Whether information about the transmission frequency of the body parameters should be shown.")]
+    public bool m_showTransmissionFrequencies = true;
     #endregion
     // Start is called before the first frame update
     void Start()
@@ -54,7 +69,7 @@ public class TcpPuppeteer : MonoBehaviour
     void Update()
     {
         Dictionary<int, Dictionary<string, float[]>> buffer;
-        lock (locker)
+        lock (locker_nextBodyInformation)
         {
             buffer = new Dictionary<int, Dictionary<string, float[]>>(m_nextBodyInformation);
         }
@@ -71,7 +86,12 @@ public class TcpPuppeteer : MonoBehaviour
             if (m_registeredBodies.TryGetValue(entry.Key, out subscribers))
             {
                 // Vector from initial position to current position with respect to the streamed data
-                Vector3 translationDifferenceData = new Vector3(entry.Value["transl"][0], entry.Value["transl"][1], entry.Value["transl"][2]) - m_initialBodyPositionsData[entry.Key];
+                Vector3 initBodyPosition;
+                lock (locker_initialBodyPositionData)
+                {
+                    initBodyPosition = m_initialBodyPositionsData[entry.Key];
+                }
+                Vector3 translationDifferenceData = new Vector3(entry.Value["transl"][0], entry.Value["transl"][1], entry.Value["transl"][2]) - initBodyPosition;
                 foreach (TcpControlledBody sub in subscribers)
                 {
                     sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
@@ -111,6 +131,27 @@ public class TcpPuppeteer : MonoBehaviour
         return m_registeredBodies[bodyID].Remove(bodyToUnregister);
     }
 
+    void OnGUI()
+    {
+        if (m_showTransmissionFrequencies)
+        {
+            Dictionary<int, int> transmFreq;
+            lock(locker_transmissionTimers)
+            {
+                transmFreq = new Dictionary<int, int>(m_transmissionFrequency);
+            }
+            int i = 0;
+            GUIStyle defaultStyle = GUI.skin.label;
+            foreach (var item in transmFreq)
+            {
+                string text = "Body ID " + item.Key + ": " + item.Value + " Hz";
+                Vector2 size = defaultStyle.CalcSize(new GUIContent(text));
+                GUI.Label(new Rect(10, (i+1) * 10 + size.y, size.x, size.y), text);
+                i++;
+            }
+        }
+    }
+
     private void ConnectToTcpServer()
     {
         try
@@ -148,11 +189,34 @@ public class TcpPuppeteer : MonoBehaviour
                             continue;
                         }
                         (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
-                        if (!m_initialBodyPositionsData.ContainsKey(bodyID))
+                        if (m_transmissionStopwatches.ContainsKey(bodyID))
                         {
-                            m_initialBodyPositionsData[bodyID] = new Vector3(transl[0], transl[1], transl[2]);
+                            double time_passed = m_transmissionStopwatches[bodyID].Elapsed.TotalSeconds;
+                            m_transmissionStopwatches[bodyID].Restart();
+                            if (time_passed != 0)
+                            {
+                                lock(locker_transmissionTimers)
+                                {
+                                    m_transmissionFrequency[bodyID] = (int)Mathf.Round(1 / (float)time_passed);
+                                }
+                            }
+                            else
+                            {
+                                Debug.Log("Got 0 for time passed since last update for body index " + bodyID);
+                            }
                         }
-                        lock (locker)
+                        else
+                        {
+                            m_transmissionStopwatches[bodyID] = Stopwatch.StartNew();
+                        }
+                        lock (locker_initialBodyPositionData)
+                        {
+                            if (!m_initialBodyPositionsData.ContainsKey(bodyID))
+                            {
+                                m_initialBodyPositionsData[bodyID] = new Vector3(transl[0], transl[1], transl[2]);
+                            }
+                        }
+                        lock (locker_nextBodyInformation)
                         {
                             m_nextBodyInformation[bodyID] = new Dictionary<string, float[]>
                             {
