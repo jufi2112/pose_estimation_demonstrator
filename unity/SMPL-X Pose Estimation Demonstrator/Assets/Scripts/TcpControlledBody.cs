@@ -144,7 +144,7 @@ public class TcpControlledBody : MonoBehaviour
         {
             bool unregisterSuccess = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
             if (!unregisterSuccess)
-                Debug.Log("Could not unregister from the puppeteer");
+                Debug.Log("Could not unregister " + gameObject.name + " from the puppeteer!");
         }
     }
 
@@ -176,12 +176,12 @@ public class TcpControlledBody : MonoBehaviour
         {
             bool registerSuccess = m_tcpPuppeteerScript.RegisterBody(gameObject, m_interestedBodyID);
             if (!registerSuccess)
-                Debug.Log("Could not register at the puppeteer, puppeteer returned an error");
+                Debug.Log("Could not register " + gameObject.name + " at the puppeteer because it returned an error");
             return registerSuccess;
         }
         else
         {
-            Debug.Log("Could not register at the Puppeteer as no matching script could be found.");
+            Debug.Log("Could not register " + gameObject.name + " at the Puppeteer, as no matching script could be found.");
             return false;
         }
     }
@@ -210,7 +210,7 @@ public class TcpControlledBody : MonoBehaviour
         }
         if (pose.Length != 165)
         {
-            Debug.Log("Could not set body pose: The given array does not have 165 elements!");
+            Debug.Log(gameObject.name + ": Could not set body pose: The given array does not have 165 elements!");
             return false;
         }
         for (int i = 0; i < 55; ++i)
