@@ -10,6 +10,13 @@ from os import path as osp
 from datetime import datetime
 from typing import Union, List, Optional
 
+try:
+    import smpl_conversion
+    smpl_conversion_imported = True
+except ImportError:
+    smpl_conversion_imported = False
+
+
 class BodyPoseTcpClient:
     """
         TCP Client that sends SMPL-X parameters to a server.
@@ -70,6 +77,12 @@ class BodyPoseTcpClient:
         loop (bool):
             Whether the motion sequence should be looped or only send once.
             Defaults to True.
+        conversion_checkpoint (str or None):
+            Path to the conversion checkpoint that should be used for
+            conversions. Defaulst to None
+        conversion_device (str):
+            Device where the conversion should be calculated on. Defaults to
+            'cpu'.
         verbosity (int):
             Verbosity level. Defaults to 1.
     """
@@ -91,6 +104,8 @@ class BodyPoseTcpClient:
                  capture_fps: Optional[int] = -1,
                  drop_frames: Optional[bool] = False,
                  loop: Optional[bool] = True,
+                 conversion_checkpoint: Optional[str] = None,
+                 conversion_device: Optional[str] = 'cpu',
                  verbosity: Optional[int] = 1
                  ):
         self.NUM_BETAS = 10     # Restriction of Unity's SMPL-X addon
@@ -110,6 +125,16 @@ class BodyPoseTcpClient:
         self.recordings = {}
         self.recording_time_start = -1
         self.time_last_frame = 0
+        self.conversion_checkpoint = conversion_checkpoint
+        self.conversion_device = conversion_device
+        if self.conversion_checkpoint is not None:
+            if smpl_conversion_imported:
+                self.converter = smpl_conversion.inference.CombinedPredictor(self.conversion_checkpoint,
+                                                                             self.conversion_device)
+            else:
+                raise ValueError("Cannot create conversion class because smpl_conversion package is not imported")
+        else:
+            self.converter = None
 
         # Whether our data only consist of a single set of shape parameters
         # or a batch of shape parameters for each pose
@@ -206,6 +231,8 @@ class BodyPoseTcpClient:
                         (current_transl, current_shape, current_pose),
                         axis=None
                     )
+                    if self.converter:
+                        data_to_transmit = self.converter.predict(data_to_transmit)
                 events = self.sel.select(timeout=None)
                 for key, mask in events:
                     status = self.service_connection(key, mask,
@@ -434,6 +461,14 @@ if __name__ == '__main__':
                         "the poses will only be broadcasted once.")
     parser.add_argument('-v', '--verbosity', type=int, default=1,
                         help="<Optional> Verbosity setting. Defaults to 1")
+    parser.add_argument('--conversion-checkpoint', type=str, default=None,
+                        help="<Optional> Conversion checkpoint that should be "
+                        "used to convert the input parameters to SMPL-X. "
+                        "Defaults to None.")
+    parser.add_argument('--conversion-device', type=str, default='cpu',
+                        help="<Optional> Device where the conversion should be"
+                        " calculated on. Defaults to 'cpu', which is faster "
+                        "than 'cuda' for single real-time predictions.")
     args = parser.parse_args()
     bodies_to_record = None
     if args.bodies_to_record is not None:
@@ -445,7 +480,8 @@ if __name__ == '__main__':
                                args.shapes_field, args.transl_field,
                                args.mocap_fps_field, args.fps,
                                args.capture_fps, args.drop_frames,
-                               not args.noloop, args.verbosity
+                               not args.noloop, args.conversion_checkpoint,
+                               args.conversion_device, args.verbosity
     )
     client.connect()
     client.run()
