@@ -148,7 +148,7 @@ public class TcpControlledBody : MonoBehaviour
         }
     }
 
-    public void SetParameters(Vector3 positionDifferenceData, float[] bodyPose)
+    public void SetParameters(Vector3 positionDifferenceData, float[] bodyPose, float[] bodyShape)
     {
         if (!m_setupComplete)
         {
@@ -167,7 +167,8 @@ public class TcpControlledBody : MonoBehaviour
         Vector4 homPositionDiff = new Vector4(positionDifferenceData.x, positionDifferenceData.y, positionDifferenceData.z, 1.0f);
         Vector3 rotatedPosDiff = m_homRotMat * homPositionDiff;
         gameObject.transform.position = m_initialPosition + rotatedPosDiff;
-        bool status = SetBodyPose(bodyPose);
+        bool status = SetBodyShape(bodyShape);
+        status = SetBodyPose(bodyPose);
     }
 
     public bool RegisterAtPuppeteer()
@@ -223,8 +224,22 @@ public class TcpControlledBody : MonoBehaviour
             m_smplxScript.SetLocalJointRotation(jointName, quat);
         }
         m_smplxScript.UpdatePoseCorrectives();
-        m_smplxScript.UpdateJointPositions(true);
+        m_smplxScript.UpdateJointPositions(false);
         return true;
+    }
+
+    private bool SetBodyShape(float[] shape)
+    {
+        if (m_smplxScript == null)
+        {
+            return false;
+        }
+        if (shape.Length != m_smplxScript.NUM_BETAS)
+        {
+            Debug.Log(gameObject.name + ": Could not set body shape: The given array does not contain 10 elements!");
+            return false;
+        }
+        m_smplxScript.SetBetaShapes(shape);
     }
 
     private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)

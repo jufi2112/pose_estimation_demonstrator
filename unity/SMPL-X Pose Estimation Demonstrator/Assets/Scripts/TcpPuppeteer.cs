@@ -24,7 +24,7 @@ public class TcpPuppeteer : MonoBehaviour
     Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
     // dict that stores for each body ID the initial position of the data
     Dictionary<int, Vector3> m_initialBodyPositionsData = new Dictionary<int, Vector3>();
-    // dict to store updated translation and pose information for each body ID, updated by TCP thread and read by main thread
+    // dict to store updated translation, shape, and pose information for each body ID, updated by TCP thread and read by main thread
     Dictionary<int, Dictionary<string, float[]>> m_nextBodyInformation = new Dictionary<int, Dictionary<string, float[]>>();
     Dictionary<int, Dictionary<string, float[]>> m_appliedBodyInformation = new Dictionary<int, Dictionary<string, float[]>>();
     // Dict that stores stopwatch instances that measure the transmission period for each body ID
@@ -40,8 +40,8 @@ public class TcpPuppeteer : MonoBehaviour
     [Tooltip("Port of the TCP server to which the client should connect.")]
     public int m_tcpPort = 7777;
     public bool m_connectAtStart = true;
-    [Tooltip("Body ID (4 bytes) + translation (3 * 4 bytes) + pose (165 * 4 bytes) = 676 bytes.")]
-    public int m_messageLengthBytes = 676;
+    [Tooltip("Body ID (4 bytes) + translation (3 * 4 bytes) + shape (10 * 4 bytes) + pose (165 * 4 bytes) = 716 bytes.")]
+    public int m_messageLengthBytes = 716;
     [Tooltip("Time in seconds to wait for the TCP listener script to gracefully shut down. After this time has passed, Abort is called.")]
     public int m_threadCloseGracePeriodSeconds = 3;
     [Tooltip("Whether information about the transmission frequency of the body parameters should be shown.")]
@@ -78,10 +78,11 @@ public class TcpPuppeteer : MonoBehaviour
             if (m_appliedBodyInformation.ContainsKey(entry.Key))
             {
                 if ((ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["transl"], entry.Value["transl"])) &&
+                    (ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["shape"], entry.Value["shape"])) &&
                     (ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["pose"], entry.Value["pose"])))
                     continue;
             }
-            // Notify registered bodies of new translation and / or pose
+            // Notify registered bodies of new translation, shape, and / or pose
             List<TcpControlledBody> subscribers;
             if (m_registeredBodies.TryGetValue(entry.Key, out subscribers))
             {
@@ -94,12 +95,13 @@ public class TcpPuppeteer : MonoBehaviour
                 Vector3 translationDifferenceData = new Vector3(entry.Value["transl"][0], entry.Value["transl"][1], entry.Value["transl"][2]) - initBodyPosition;
                 foreach (TcpControlledBody sub in subscribers)
                 {
-                    sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
+                    sub.SetParameters(translationDifferenceData, entry.Value["pose"], entry.Value["shape"]);
                 }
             }
             m_appliedBodyInformation[entry.Key] = new Dictionary<string, float[]>
             {
                 ["transl"] = entry.Value["transl"],
+                ["shape"] = entry.Value["shape"],
                 ["pose"] = entry.Value["pose"]
             };
         }
@@ -188,7 +190,7 @@ public class TcpPuppeteer : MonoBehaviour
                             Debug.Log("Unable to read " + m_messageLengthBytes + " bytes (received " + bytesRead + " bytes instead), skipping message");
                             continue;
                         }
-                        (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
+                        (int bodyID, float[] transl, float[] shape, float[] pose) = DeserializeNumpyStream<float>(bytes);
                         if (m_transmissionStopwatches.ContainsKey(bodyID))
                         {
                             double time_passed = m_transmissionStopwatches[bodyID].Elapsed.TotalSeconds;
@@ -221,6 +223,7 @@ public class TcpPuppeteer : MonoBehaviour
                             m_nextBodyInformation[bodyID] = new Dictionary<string, float[]>
                             {
                                 ["transl"] = transl,
+                                ["shape"] = shape,
                                 ["pose"] = pose
                             };
                         }
@@ -265,14 +268,16 @@ public class TcpPuppeteer : MonoBehaviour
             Debug.Log("Socket exception: " + socketException);
         }
     }
-    private (int, T[], T[]) DeserializeNumpyStream<T>(byte[] bytes)
+    private (int, T[], T[], T[]) DeserializeNumpyStream<T>(byte[] bytes)
     {
         int bodyID = DeserializeBodyID(bytes); 
         T[] transl = new T[12 / Marshal.SizeOf(typeof(T))];
+        T[] shape = new T[40 / Marshal.SizeOf(typeof(T))];
         T[] pose = new T[660 / Marshal.SizeOf(typeof(T))];
         Buffer.BlockCopy(bytes, 4, transl, 0, 12);
-        Buffer.BlockCopy(bytes, 16, pose, 0, 660);
-        return (bodyID, transl, pose);
+        Buffer.BlockCopy(bytes, 16, shape, 0, 40);
+        Buffer.BlockCopy(bytes, 56, pose, 0, 660);
+        return (bodyID, transl, shape, pose);
     }
 
     private int DeserializeBodyID(byte[] bytes)

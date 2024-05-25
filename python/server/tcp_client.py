@@ -1,23 +1,100 @@
-import socket
-import time
-from datetime import datetime
-from os import path as osp
 import os
-import numpy as np
-import quaternion
+import time
+import socket
 import argparse
 import selectors
-import types
-import sys
+import quaternion
+import numpy as np
+
+from os import path as osp
+from datetime import datetime
+from typing import Union, List, Optional
 
 class BodyPoseTcpClient:
-    """Loosely based on this article: https://realpython.com/python-sockets/"""
-    def __init__(self, host, port, record, record_dir, bodies_to_record,
-                 is_producer, angle, keep_yz_axes, npz_file = None,
-                 poses_attribute = None, transl_attribute = None,
-                 capture_fps_attribute = None, target_fps = -1,
-                 capture_fps = -1, drop_frames = False, loop = True,
-                 verbosity = 1):
+    """
+        TCP Client that sends SMPL-X parameters to a server.
+        Loosely based on this article: https://realpython.com/python-sockets/
+
+    Params
+    ------
+        host (str):
+            Server hostname
+        port (int):
+            Server port
+        record (bool):
+            Whether the client should record all transmitted data.
+        record_dir (str):
+            Directory to which the recordings should be saved to.
+        bodies_to_record (list or None):
+            Body IDs that should be recorded. If None is provided, records
+            all body IDs.
+        is_producer (bool):
+            Whether this client should be a producer (i.e. it will send
+            data to the server instead of receiving them).
+        angle (float):
+            Angle (in deg) by which the global orientation should be rotated
+            around the x-Axis in order to match Unity's default rotation.
+        keep_yz_axes (bool):
+            If True, y and z axes will not be swapped.
+        npz_file (str or None):
+            Path to a .npz file that contains the poses that should be
+            broadcasted. Defaults to None.
+        poses_attribute (str or None):
+            If the client should act as producer with a provided npz file,
+            this is the field under which the poses should be located.
+            Defaults to None.
+        shapes_attribute (str or None):
+            If the client should act as producer with a provided npz file,
+            this is the field under which the shapes should be located.
+            Defaults to None.
+        transl_attribute (str or None):
+            If the client should act as producer with a provided npz file,
+            this is the field under which the shapes should be located.
+            Defaults to None.
+        capture_fps_attribute (str or None):
+            If the client should act as producer with a provided npz file,
+            this is the field under which the mocap framerate is located.
+            Defaults to None.
+        target_fps (int):
+            FPS which which the data should be send. Defaults to -1,
+            which sets it to be the same as the capture fps.
+        capture_fps (int):
+            FPS with which the recorded data were captured. Overwrites
+            the value obtained from capture_fps_attribute. Defaults to -1,
+            which deactivates it and instead uses the information from the
+            capture_fps_attribute field.
+        drop_frames (bool):
+            Whether frames should be dropped if the target replay framerate
+            (target_fps) does not match the capture framerate. Requires that
+            the capturing framerate is known. Defaults to False.
+        loop (bool):
+            Whether the motion sequence should be looped or only send once.
+            Defaults to True.
+        verbosity (int):
+            Verbosity level. Defaults to 1.
+    """
+    def __init__(self,
+                 host: str,
+                 port: int,
+                 record: bool,
+                 record_dir: str,
+                 bodies_to_record: Union[List, None],
+                 is_producer: bool,
+                 angle: float,
+                 keep_yz_axes: bool,
+                 npz_file: Optional[str] = None,
+                 poses_attribute: Optional[str] = None,
+                 shapes_attribute: Optional[str] = None,
+                 transl_attribute: Optional[str] = None,
+                 capture_fps_attribute: Optional[str] = None,
+                 target_fps: Optional[int] = -1,
+                 capture_fps: Optional[int] = -1,
+                 drop_frames: Optional[bool] = False,
+                 loop: Optional[bool] = True,
+                 verbosity: Optional[int] = 1
+                 ):
+        self.NUM_BETAS = 10     # Restriction of Unity's SMPL-X addon
+        self.TRANSMISSION_MESSAGE_LENGTH_BYTES = 716  # Body ID 4 + Translation 3*4 + Betas 10 * 4 + Poses 165 * 4
         self.host = host
         self.port = port
         self.is_producer = is_producer
@@ -33,15 +110,22 @@ class BodyPoseTcpClient:
         self.recordings = {}
         self.recording_time_start = -1
         self.time_last_frame = 0
+
+        # Whether our data only consist of a single set of shape parameters
+        # or a batch of shape parameters for each pose
+        self.single_shape_parameters = True
         mocap_fps = None
         if self.is_producer and self.record:
             raise ValueError(
                 "The client cannot record and be a producer at the same time!"
             )
         if self.is_producer and npz_file:
-            self.poses, self.transl, mocap_fps = self._load_npz_attributes(
+            (
+                self.poses, self.shapes, self.transl, mocap_fps
+            ) = self._load_npz_attributes(
                 npz_file,
                 poses_attribute,
+                shapes_attribute,
                 transl_attribute,
                 capture_fps_attribute
             )
@@ -50,9 +134,9 @@ class BodyPoseTcpClient:
                 self._add_x_angle_offset_to_poses()
             if self.transl is not None and not self.keep_yz_axes:
                 self.transl = self._swap_translation_yz_axes(self.transl)
-            if self.poses is None or self.transl is None:
+            if self.poses is None or self.shapes is None or self.transl is None:
                 if self.verbosity > 0:
-                    print("Defaulting to sending 1 and 0 poses.")
+                    print("Defaulting to sending 1 and 0 sequences.")
         self.transmit_ones = True
         self.capture_fps = mocap_fps if capture_fps == -1 else capture_fps
         if drop_frames and self.capture_fps is None:
@@ -106,7 +190,7 @@ class BodyPoseTcpClient:
             time_last_transmission = time.perf_counter()
             while continue_connection:
                 data_to_transmit = None
-                if isinstance(self.poses, np.ndarray) and isinstance(self.transl, np.ndarray):
+                if isinstance(self.poses, np.ndarray) and isinstance(self.shapes, np.ndarray) and isinstance(self.transl, np.ndarray):
                     if poses_idx >= self.poses.shape[0]:
                         if not self.loop:
                             if self.verbosity > 0:
@@ -116,9 +200,10 @@ class BodyPoseTcpClient:
                             break
                         poses_idx = 0
                     current_pose = self.poses[poses_idx]
+                    current_shape = self.shapes if self.single_shape_parameters else self.shapes[poses_idx]
                     current_transl = self.transl[poses_idx]
                     data_to_transmit = np.concatenate(
-                        (current_transl, current_pose),
+                        (current_transl, current_shape, current_pose),
                         axis=None
                     )
                 events = self.sel.select(timeout=None)
@@ -147,7 +232,7 @@ class BodyPoseTcpClient:
     def service_connection(self, key, mask, data_to_transmit,
                            time_last_transmission) -> bool:
         if mask & selectors.EVENT_READ:
-            recv_data = self.sock.recv(676)
+            recv_data = self.sock.recv(self.TRANSMISSION_MESSAGE_LENGTH_BYTES)
             if not recv_data:
                 if self.verbosity > 0:
                     print("Server closed the connection")
@@ -162,10 +247,12 @@ class BodyPoseTcpClient:
             self.time_last_transmission = time_now
             body_id = int.from_bytes(recv_data[:4], 'big')
             transl = np.frombuffer(recv_data[4:16], dtype=np.float32)
-            pose = np.frombuffer(recv_data[16:], dtype=np.float32)
+            shape = np.frombuffer(recv_data[16:56], dtype=np.float32)
+            pose = np.frombuffer(recv_data[56:], dtype=np.float32)
             if self.verbosity > 1:
                 print(f"Body index {body_id} | Translation: {transl} | "
-                      f"Pose shape: {pose.shape} | First 6 elements: {pose[:6]}")
+                      f"Shape: {shape} | Pose shape: {pose.shape} "
+                      f"| First 6 elements: {pose[:6]}")
             if self.record:
                 if self.bodies_to_record is None or body_id in self.bodies_to_record:
                     curr_time = time.perf_counter()
@@ -173,12 +260,14 @@ class BodyPoseTcpClient:
                         self.recordings[body_id] = {
                             'poses': [pose],
                             'transl': [transl],
+                            'shapes': [shape],
                             'time_first_frame': curr_time,
                             'time_last_frame': curr_time
                         }
                     else:
                         self.recordings[body_id]['poses'].append(pose)
                         self.recordings[body_id]['transl'].append(transl)
+                        self.recordings[body_id]['shapes'].append(shape)
                         self.recordings[body_id]['time_last_frame'] = curr_time
             return True
         if mask & selectors.EVENT_WRITE:
@@ -186,7 +275,7 @@ class BodyPoseTcpClient:
                 return True
             to_transmit = data_to_transmit
             if not isinstance(to_transmit, np.ndarray):
-                to_transmit = np.zeros((168,), dtype=np.float32)
+                to_transmit = np.zeros((178,), dtype=np.float32)
                 if self.transmit_ones:
                     to_transmit += 1
                 self.transmit_ones = not self.transmit_ones
@@ -212,17 +301,28 @@ class BodyPoseTcpClient:
             return time.perf_counter()
 
 
-    def _load_npz_attributes(self, npz_file, pose_attribute, transl_attribute,
-                             capture_fps_attribute):
+    def _load_npz_attributes(self, npz_file, pose_attribute, shape_attribute,
+                             transl_attribute, capture_fps_attribute):
         if not osp.isfile(npz_file):
-            return None, None, None
+            return None, None, None, None
         content = np.load(npz_file)
         if not pose_attribute in list(content.keys()):
-            return None, None, None
+            return None, None, None, None
+        if not shape_attribute in list(content.keys()):
+            return None, None, None, None
         if not transl_attribute in list(content.keys()):
-            return None, None, None
+            return None, None, None, None
+        shapes = content[shape_attribute].astype(np.float32)
+        # We only want to save the required number of shape parameters
+        if shapes.ndim == 1:
+            self.single_shape_parameters = True
+            shapes = shapes[:self.NUM_BETAS]
+        else:
+            self.single_shape_parameters = False
+            shapes = shapes[:, :self.NUM_BETAS]
         return (
             content[pose_attribute].astype(np.float32),
+            shapes,
             content[transl_attribute].astype(np.float32),
             content.get(capture_fps_attribute, default=None)
         )
@@ -243,6 +343,7 @@ class BodyPoseTcpClient:
         rec_dir = {}
         for body_id in list(self.recordings.keys()):
             rec_dir[f'{body_id}_poses'] = np.stack(self.recordings[body_id]['poses'])
+            rec_dir[f'{body_id}_shapes'] = np.stack(self.recordings[body_id]['shapes'])
             rec_dir[f'{body_id}_transl'] = np.stack(self.recordings[body_id]['transl'])
             time_elapsed = self.recordings[body_id]['time_last_frame'] - self.recordings[body_id]['time_first_frame']
             if time_elapsed <= 0:
@@ -305,6 +406,9 @@ if __name__ == '__main__':
     parser.add_argument('--poses-field', type=str, default="poses",
                         help="<Optional> Name of the npz field that contains "
                         "the poses to broadcast. Defaults to 'poses'.")
+    parser.add_argument('--shapes-field', type=str, defaults="betas",
+                        help="<Optional> Name of the npz field that contains "
+                        "the poses to broadcast. Defaults to 'betas'.")
     parser.add_argument('--transl-field', type=str, default="trans",
                         help="<Optional> Name of the npz field that contains "
                         "the translations to broadcast. Defaults to 'trans'.")
@@ -338,8 +442,9 @@ if __name__ == '__main__':
     client = BodyPoseTcpClient(args.host, args.port, args.record, args.output,
                                bodies_to_record, args.producer, args.angle,
                                args.keep_yz_axes, args.data, args.poses_field,
-                               args.transl_field, args.mocap_fps_field,
-                               args.fps, args.capture_fps, args.drop_frames,
+                               args.shapes_field, args.transl_field,
+                               args.mocap_fps_field, args.fps,
+                               args.capture_fps, args.drop_frames,
                                not args.noloop, args.verbosity
     )
     client.connect()
