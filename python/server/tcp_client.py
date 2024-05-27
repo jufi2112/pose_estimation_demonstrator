@@ -131,6 +131,11 @@ class BodyPoseTcpClient:
             if smpl_conversion_imported:
                 self.converter = smpl_conversion.inference.CombinedPredictor(self.conversion_checkpoint,
                                                                              self.conversion_device)
+                if self.converter.get_number_shape_components() is not None:
+                    if self.converter.get_number_shape_components() < self.NUM_BETAS:
+                        print(f"Warning: Loss of shape information! The loaded converter takes "
+                              f"{self.converter.get_number_shape_components()} shape components as input, but there "
+                              f"will be {self.NUM_BETAS} components transmitted over the network")
             else:
                 raise ValueError("Cannot create conversion class because smpl_conversion package is not imported")
         else:
@@ -175,7 +180,7 @@ class BodyPoseTcpClient:
         if drop_frames and self.capture_fps < 1:
             raise ValueError(f"Invalid capture fps: {self.capture_fps}")
         self.target_fps = target_fps if target_fps != -1 else self.capture_fps
-        if self.target_fps == 0:
+        if self.target_fps == 0 or self.target_fps is None:
             raise ValueError(f"Invalid target fps: {self.target_fps}")
         if self.is_producer:
             self.time_to_sleep = 1 / self.target_fps
@@ -227,12 +232,19 @@ class BodyPoseTcpClient:
                     current_pose = self.poses[poses_idx]
                     current_shape = self.shapes if self.single_shape_parameters else self.shapes[poses_idx]
                     current_transl = self.transl[poses_idx]
-                    data_to_transmit = np.concatenate(
-                        (current_transl, current_shape, current_pose),
-                        axis=None
+                    current_shape = self._adapt_betas_shape(current_shape)
+                    data_to_transmit = np.hstack(
+                        (current_transl, current_shape, current_pose)
                     )
                     if self.converter:
-                        data_to_transmit = self.converter.predict(data_to_transmit)
+                        pred = self.converter.predict(data_to_transmit, split_output=True)
+                        data_to_transmit = np.hstack(
+                            (
+                                pred.trans.cpu().numpy(),
+                                self._adapt_betas_shape(pred.betas.cpu().numpy(), True),
+                                pred.poses.cpu().numpy()
+                            )
+                        )
                 events = self.sel.select(timeout=None)
                 for key, mask in events:
                     status = self.service_connection(key, mask,
@@ -331,22 +343,24 @@ class BodyPoseTcpClient:
     def _load_npz_attributes(self, npz_file, pose_attribute, shape_attribute,
                              transl_attribute, capture_fps_attribute):
         if not osp.isfile(npz_file):
+            print(f"ERROR: Not a valid file: {npz_file}", flush=True)
             return None, None, None, None
         content = np.load(npz_file)
         if not pose_attribute in list(content.keys()):
+            print(f"Error: Could not find pose attribute {pose_attribute} in {npz_file}", flush=True)
             return None, None, None, None
         if not shape_attribute in list(content.keys()):
+            print(f"Error: Could not find shape attribute {shape_attribute} in {npz_file}", flush=True)
             return None, None, None, None
         if not transl_attribute in list(content.keys()):
+            print(f"Error: Could not find translation attribute {transl_attribute} in {npz_file}", flush=True)
             return None, None, None, None
         shapes = content[shape_attribute].astype(np.float32)
         # We only want to save the required number of shape parameters
         if shapes.ndim == 1:
             self.single_shape_parameters = True
-            shapes = shapes[:self.NUM_BETAS]
         else:
             self.single_shape_parameters = False
-            shapes = shapes[:, :self.NUM_BETAS]
         return (
             content[pose_attribute].astype(np.float32),
             shapes,
@@ -401,6 +415,53 @@ class BodyPoseTcpClient:
         #         )
         # # swap y and z Axis to conform to Unity's coordinate system
         # return np.einsum('ij,kj->ki', swap_yz_mat, arr)
+
+
+    def _adapt_betas_shape(self,
+                           betas: np.ndarray,
+                           ignore_converter: bool = False):
+        """
+            Adapts the given betas' shape to the requirements, e.g. depending
+            on self.NUM_BETAS but also what a potentially available
+            converter expects as input. If betas is smaller than the
+            required output size, it will be padded with zeros.
+
+        Params
+        ------
+            betas (np.ndarray):
+                The shape parameters as a one-dimensional array of length n
+            ignore_converter (bool):
+                Whether the required shape calculation should ignore the
+                converter. In this case, the returned shape parameters are
+                always of the right shape for transmission.
+
+        Result
+        ------
+            np.ndarray:
+                The shape parameters as a one-dimensional array of length m,
+                where m is either suited for direct transmission
+                (m == self.NUM_BETAS) or for use in the conversion network
+                stored in self.converter (m == converter.num_shape_components)
+        """
+        if self.converter and not ignore_converter:
+            n_shape_components = self.converter.get_number_shape_components()
+            if n_shape_components is None:
+                raise ValueError("Could not infer required number of shape "
+                                 "components for conversion network!")
+            n = len(betas)
+            delta_m = n_shape_components - n
+            if delta_m == 0:
+                return betas
+            elif delta_m > 0:
+                return np.hstack([betas, np.zeros(delta_m, dtype=np.float32)])
+            elif delta_m < 0:
+                return betas[:n_shape_components]
+        else:
+            if len(betas) >= self.NUM_BETAS:
+                return betas[:self.NUM_BETAS]
+            else:
+                return np.hstack(betas, np.zeros(self.NUM_BETAS - len(betas),
+                                                 dtype=np.float32))
         
 
 if __name__ == '__main__':
@@ -433,7 +494,7 @@ if __name__ == '__main__':
     parser.add_argument('--poses-field', type=str, default="poses",
                         help="<Optional> Name of the npz field that contains "
                         "the poses to broadcast. Defaults to 'poses'.")
-    parser.add_argument('--shapes-field', type=str, defaults="betas",
+    parser.add_argument('--shapes-field', type=str, default="betas",
                         help="<Optional> Name of the npz field that contains "
                         "the poses to broadcast. Defaults to 'betas'.")
     parser.add_argument('--transl-field', type=str, default="trans",

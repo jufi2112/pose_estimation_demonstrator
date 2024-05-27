@@ -234,12 +234,14 @@ public class TcpControlledBody : MonoBehaviour
         {
             return false;
         }
-        if (shape.Length != m_smplxScript.NUM_BETAS)
+        if (shape.Length != 10)
         {
             Debug.Log(gameObject.name + ": Could not set body shape: The given array does not contain 10 elements!");
             return false;
         }
-        m_smplxScript.SetBetaShapes(shape);
+        m_smplxScript.betas = shape;
+        m_smplxScript.SetBetaShapes();
+        return true;
     }
 
     private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)
