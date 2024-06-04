@@ -6,6 +6,7 @@ import selectors
 import quaternion
 import numpy as np
 
+from dotmap import DotMap
 from os import path as osp
 from datetime import datetime
 from typing import Union, List, Optional
@@ -106,6 +107,7 @@ class BodyPoseTcpClient:
                  loop: Optional[bool] = True,
                  conversion_checkpoint: Optional[str] = None,
                  conversion_device: Optional[str] = 'cpu',
+                 calculate_conversion_errors: Optional[bool] = False,
                  verbosity: Optional[int] = 1
                  ):
         self.NUM_BETAS = 10     # Restriction of Unity's SMPL-X addon
@@ -127,10 +129,14 @@ class BodyPoseTcpClient:
         self.time_last_frame = 0
         self.conversion_checkpoint = conversion_checkpoint
         self.conversion_device = conversion_device
+        self.calculate_conversion_errors = calculate_conversion_errors
         if self.conversion_checkpoint is not None:
             if smpl_conversion_imported:
                 self.converter = smpl_conversion.inference.CombinedPredictor(self.conversion_checkpoint,
-                                                                             self.conversion_device)
+                                                                             self.calculate_conversion_errors,
+                                                                             self.conversion_device,
+                                                                             body_model_location='D:\\data\\smpl_models',
+                                                                             transfer_file_location='D:\\data\\smpl_models\\transfer')
                 if self.converter.get_number_shape_components() is not None:
                     if self.converter.get_number_shape_components() < self.NUM_BETAS:
                         print(f"Warning: Loss of shape information! The loaded converter takes "
@@ -161,9 +167,11 @@ class BodyPoseTcpClient:
             )
             # Transform poses and translation to SMPL-X's coordinate system
             if self.poses is not None:
-                self._add_x_angle_offset_to_poses()
+                pass
+                #self._add_x_angle_offset_to_poses()
             if self.transl is not None and not self.keep_yz_axes:
-                self.transl = self._swap_translation_yz_axes(self.transl)
+                pass
+                #self.transl = self._swap_translation_yz_axes(self.transl)
             if self.poses is None or self.shapes is None or self.transl is None:
                 if self.verbosity > 0:
                     print("Defaulting to sending 1 and 0 sequences.")
@@ -229,22 +237,25 @@ class BodyPoseTcpClient:
                                 )
                             break
                         poses_idx = 0
+                    # Transform pose to Unity's coordinate system
                     current_pose = self.poses[poses_idx]
                     current_shape = self.shapes if self.single_shape_parameters else self.shapes[poses_idx]
                     current_transl = self.transl[poses_idx]
                     current_shape = self._adapt_betas_shape(current_shape)
-                    data_to_transmit = np.hstack(
-                        (current_transl, current_shape, current_pose)
-                    )
                     if self.converter:
-                        pred = self.converter.predict(data_to_transmit, split_output=True)
-                        data_to_transmit = np.hstack(
-                            (
-                                pred.trans.cpu().numpy(),
-                                self._adapt_betas_shape(pred.betas.cpu().numpy(), True),
-                                pred.poses.cpu().numpy()
-                            )
-                        )
+                        inp = DotMap({'trans': current_transl, 'betas': current_shape, 'poses': current_pose}, _dynamic=False)
+                        pred, metric = self.converter.predict(inp, split_output=True, errors_to_calculate=['mpvpe'] if self.calculate_conversion_errors else None)
+                        if metric is not None and metric > 0.05:
+                            print(f"High Conversion MPVPE: {metric.item()}")
+                        current_transl = pred.trans.cpu().numpy()[0]
+                        current_shape = pred.betas.cpu().numpy()[0]
+                        current_pose = pred.poses.cpu().numpy()[0]
+                    data_to_transmit = np.hstack(
+                        (
+                            self._swap_translation_yz_axes_single(current_transl),
+                            self._adapt_betas_shape(current_shape, True),
+                            self._add_x_angle_offset_to_single_pose(current_pose)
+                        ))
                 events = self.sel.select(timeout=None)
                 for key, mask in events:
                     status = self.service_connection(key, mask,
@@ -356,7 +367,6 @@ class BodyPoseTcpClient:
             print(f"Error: Could not find translation attribute {transl_attribute} in {npz_file}", flush=True)
             return None, None, None, None
         shapes = content[shape_attribute].astype(np.float32)
-        # We only want to save the required number of shape parameters
         if shapes.ndim == 1:
             self.single_shape_parameters = True
         else:
@@ -374,6 +384,30 @@ class BodyPoseTcpClient:
         quats = quaternion.from_rotation_vector(self.poses[:, :3])
         rotX = quaternion.from_rotation_vector(np.asarray([1,0,0]) * np.deg2rad(self.x_rot_angle))
         self.poses[:, :3] = quaternion.as_rotation_vector(rotX * quats)
+
+
+
+    def _add_x_angle_offset_to_single_pose(self,
+                                           pose: np.ndarray
+                                           ) -> np.ndarray:
+        """
+            Transforms the given pose to Unity's coordinate system by rotating
+            around self.x_rot_angle degrees around the x axis
+
+        Params
+        ------
+            pose (np.ndarray):
+                Pose which should be transformed. Shape (N)
+
+        Returns
+        -------
+            np.ndarray:
+                The transformed pose. Shape (N)
+        """
+        quat = quaternion.from_rotation_vector(pose[:3])
+        rotX = quaternion.from_rotation_vector(np.asarray([1,0,0]) * np.deg2rad(self.x_rot_angle))
+        pose[:3] = quaternion.as_rotation_vector(rotX * quat)
+        return pose
 
 
     def _save_recording(self):
@@ -415,6 +449,13 @@ class BodyPoseTcpClient:
         #         )
         # # swap y and z Axis to conform to Unity's coordinate system
         # return np.einsum('ij,kj->ki', swap_yz_mat, arr)
+
+
+    def _swap_translation_yz_axes_single(self, arr):
+        """
+            Swap y and z axis to conform to Unity's coordinate system
+        """
+        return arr[[0,2,1]]
 
 
     def _adapt_betas_shape(self,
@@ -530,6 +571,8 @@ if __name__ == '__main__':
                         help="<Optional> Device where the conversion should be"
                         " calculated on. Defaults to 'cpu', which is faster "
                         "than 'cuda' for single real-time predictions.")
+    parser.add_argument('--calc-conversion-errors', action='store_true',
+                        help="Calculate conversion errors. Reduces performance.")
     args = parser.parse_args()
     bodies_to_record = None
     if args.bodies_to_record is not None:
@@ -542,7 +585,8 @@ if __name__ == '__main__':
                                args.mocap_fps_field, args.fps,
                                args.capture_fps, args.drop_frames,
                                not args.noloop, args.conversion_checkpoint,
-                               args.conversion_device, args.verbosity
+                               args.conversion_device, args.calc_conversion_errors,
+                               args.verbosity
     )
     client.connect()
     client.run()
