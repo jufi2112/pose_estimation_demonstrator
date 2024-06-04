@@ -10,6 +10,7 @@ class BodyPoseTcpServer:
     """Loosely based on this article: https://realpython.com/python-sockets/"""
     def __init__(self, host, port, connections_to_accept,
                  send_initial_transmissions):
+        self.TRANSMISSION_MESSAGE_LENGTH_BYTES = 712  # Translation 3*4 + Betas 10 * 4 + Poses 165 * 4 ## No body IDs in transmissions from clients
         self.host = host
         self.port = port
         self.connections_to_accept = connections_to_accept
@@ -18,7 +19,7 @@ class BodyPoseTcpServer:
         self.lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.consumers = []
         self.clients = {}
-        self.body_poses = {}
+        self.body_params = {}
         self.send_initial_transmissions = send_initial_transmissions
         self.first_transmissions = {}
         self.next_free_body_id = 1
@@ -90,7 +91,7 @@ class BodyPoseTcpServer:
                     )
             self.sel.modify(sock, selectors.EVENT_READ, data)
         if mask & selectors.EVENT_READ:
-            recv_data = sock.recv(672)
+            recv_data = sock.recv(self.TRANSMISSION_MESSAGE_LENGTH_BYTES)
             if recv_data:
                 if not data.producer:
                     # client is now a producer
@@ -111,7 +112,7 @@ class BodyPoseTcpServer:
                         )
                     self.next_free_body_id += 1
                 curr_body_id = self.clients[sock]['body_id']
-                self.body_poses[curr_body_id] = recv_data
+                self.body_params[curr_body_id] = recv_data
                 self._update_consumers(curr_body_id, verbosity)
             else:
                 if verbosity > 0:
@@ -130,7 +131,7 @@ class BodyPoseTcpServer:
     def _update_consumers(self, body_id, verbosity):
         for sock in self.consumers:
             data_to_transmit = int(body_id).to_bytes(4, 'big') \
-                + self.body_poses[body_id]
+                + self.body_params[body_id]
             if verbosity > 1:
                 print(f"Transmitting to {self.clients[sock]['addr']}")
             sock.sendall(data_to_transmit)
