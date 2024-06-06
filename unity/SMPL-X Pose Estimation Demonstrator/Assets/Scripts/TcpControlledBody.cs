@@ -59,6 +59,7 @@ public class TcpControlledBody : MonoBehaviour
                 GameObject[] freeViewCams = GameObject.FindGameObjectsWithTag("Free_Camera");
                 if (freeViewCams.Length > 0)
                 {
+                    Debug.Log("Detected Free_Camera: " + freeViewCams.Length);
                     m_freeCamera = freeViewCams[0].gameObject.GetComponent<Camera>();
                 }
                 else
@@ -227,6 +228,7 @@ public class TcpControlledBody : MonoBehaviour
         return true;
     }
 
+    // Find and assign every gameobject with it's own pov_camera.
     private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)
     {
         for (int i = 0; i < parent.childCount; ++i)

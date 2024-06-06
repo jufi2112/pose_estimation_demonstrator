@@ -156,6 +156,7 @@ public class TcpPuppeteer : MonoBehaviour
     {
         try
         {
+            // Create a Thread for getting the Data (from AMASS?).
             m_clientReceiveThread = new Thread(new ThreadStart(ListenForData));
             m_clientReceiveThread.IsBackground = true;
             m_clientReceiveThread.Start();
@@ -166,25 +167,27 @@ public class TcpPuppeteer : MonoBehaviour
         }
     }
 
+    // Listener for Input.
     private void ListenForData()
     {
         try
         {
-            m_socketConnection = new TcpClient(m_tcpIP, m_tcpPort);
-            Byte[] bytes = new Byte[m_messageLengthBytes];
+            m_socketConnection = new TcpClient(m_tcpIP, m_tcpPort); // Connection to Tcp Client.
+            Byte[] bytes = new Byte[m_messageLengthBytes]; // Data length: Body ID (4 bytes) + translation (3 * 4 bytes) + pose (165 * 4 bytes) = 676 bytes
             while (!m_stopThread)
             {
-                if (m_socketConnection == null)
+                if (m_socketConnection == null) // No connection to tcp client, then do nothing.
                     break;
                 // Get stream object for reading
                 using (NetworkStream stream = m_socketConnection.GetStream())
                 {
                     int bytesRead;
                     // read incoming stream into byte array
-                    while (((bytesRead = stream.Read(bytes, 0, bytes.Length)) != 0) && (!m_stopThread))
+                    while (((bytesRead = stream.Read(bytes, 0, bytes.Length)) != 0) && (!m_stopThread)) // Read one frame data, .Read() return the byte size that is readed.
                     {
                         if (bytesRead != m_messageLengthBytes)
                         {
+                            // Illeagal Msg will be skipped.
                             Debug.Log("Unable to read " + m_messageLengthBytes + " bytes (received " + bytesRead + " bytes instead), skipping message");
                             continue;
                         }

@@ -9,4 +9,7 @@ EditorBuildSettings:
     path: Assets/Scenes/Prediction.unity
     guid: a5b38822f181122d98b323c4eaf3f9e4
   m_configObjects:
+    Unity.XR.Oculus.Settings: {fileID: 11400000, guid: e92608832fd418745b7bfe5ec8fc08b2, type: 2}
     com.unity.input.settings: {fileID: 11400000, guid: d6e8d07617e8b22ebadf3333aeb63f11, type: 2}
+    com.unity.xr.management.loader_settings: {fileID: 11400000, guid: dcc5d0b6f5596644287352cf27b429e7, type: 2}
+    com.unity.xr.openxr.settings4: {fileID: 11400000, guid: 35cc6a5de37355c45bcb59152d7e71bb, type: 2}

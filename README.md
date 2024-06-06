@@ -23,6 +23,8 @@ Tested with Unity 2021.3.19f1 on Windows 11 and Ubuntu 22.04
     - This requires a python environment with numpy installed
     - **Tip:** You can make a client act as a producer (and send poses from an existing `.npz` file, e.g. from the [AMASS](https://amass.is.tue.mpg.de/) dataset) by calling `python tcp_client.py --producer -d <path to the .npz file> --fps X` where X specifies the fps with which the poses should be send to the server
         - `python tcp_client.py -h` provides information on further parameters that may be necessary, depending on your `.npz` file.
+    -  **Tips from Sirius:** For "ModuleNotFoundError: No module named 'quaternion'", when you use pip, first uninstall the quaternion, and reinstall the numpy-quaternion, this could solve the problem.
+    
 3. Start the playback in the Unity `Prediction` scene
     - In order to use the latest scripts from GitHub, you may need to trigger a recompilation
     - You can tweak various settings in the already placed `TcpPuppeteer` and `smplx_male_tcp` prefabs
@@ -36,3 +38,7 @@ Tested with Unity 2021.3.19f1 on Windows 11 and Ubuntu 22.04
 We're using the following Unity packages inside of the demonstrator:
 - SMPL-X Unity Package [link](https://smpl-x.is.tue.mpg.de/index.html)
 - Pcx - Point Cloud Importer/Renderer for Unity [link](https://github.com/keijiro/Pcx)
+
+# Cmds saved for my own dev:
+**.npz path:** python tcp_client.py --producer -d 'J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP CG&Vis\Code\pose_estimation_demonstrator\python\server\MoSh\00046\female_stagei.npz' --fps 10
+
