@@ -15,10 +15,10 @@ public class PoseStationTest : MonoBehaviour
 {
     private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
     private bool single_shape_paramenters = true;
-    private ns.NDArray poses;
-    private ns.NDArray shapes;
-    private ns.NDArray transl;
-    private ns.NDArray fps = null;
+    private Numpy.NDarray poses;
+    private Numpy.NDarray shapes;
+    private Numpy.NDarray transl;
+    private float fps = -1;
     // Start is called before the first frame update
     void Start()
     {        
@@ -47,13 +47,15 @@ public class PoseStationTest : MonoBehaviour
     {
         
     }
-    (ns.NDArray, ns.NDArray,ns.NDArray,ns.NDArray) _load_npz_attribute(string npz_file, 
+    (Numpy.NDarray, Numpy.NDarray, Numpy.NDarray, float) _load_npz_attribute(string npz_file, 
         string pose_attribute, string shape_attribute, 
         string transl_attribute, string capture_fps_attribute)
     {
         Dictionary<string, object> contents = new Dictionary<string, object>();
 
-        string extract_path = Path.Combine(Application.dataPath, "Dataset");
+        string npz_name = Path.GetFileNameWithoutExtension(npz_file);
+        Debug.Log($"npz_name: {npz_name}" );
+        string extract_path = Path.Combine(Application.dataPath, "Dataset", npz_name);
         string poses_path = Path.Combine(extract_path, "poses.npy");
         string betas_path = Path.Combine(extract_path, "betas.npy");
         string trans_path = Path.Combine(extract_path, "trans.npy");
@@ -114,11 +116,11 @@ public class PoseStationTest : MonoBehaviour
         !File.Exists(betas_path) ||
         !File.Exists(trans_path))
         {
-            return (null, null, null, null);
+            return (Numpy.np.empty(new int[] {0}), Numpy.np.empty(new int[] {0}), Numpy.np.empty(new int[] {0}), -1);
         }
 
         // Every attribute exsits, read them.
-        var shapes_NDArray = ns.np.load(betas_path);
+        var shapes_NDArray = np.np.load(betas_path);
         if(shapes_NDArray.ndim == 1)
         {
             single_shape_paramenters = true;
@@ -127,26 +129,28 @@ public class PoseStationTest : MonoBehaviour
         {
             single_shape_paramenters = false;
         }
-        var poses_NDArray = ns.np.load(poses_path);
-        var trans_NDArray = ns.np.load(trans_path);
-        ns.NDArray fps_NDArray = null;
-        if(!File.Exists(fps_path))
+        var poses_NDArray = np.np.load(poses_path);
+        var trans_NDArray = np.np.load(trans_path);
+                
+        float fps_value = -1;
+        if(File.Exists(fps_path))
         {
-            fps_NDArray = ns.np.load(fps_path);
+            Numpy.NDarray fps_NDArray = np.np.load(fps_path);
+            fps_value = fps_NDArray.asscalar<float>();
         }
 
-        Debug.Log($"betas: {shapes_NDArray}");
-        Debug.Log("betas shape: (" + string.Join(", ", shapes_NDArray.shape)+")");
-        Debug.Log($"poses: {poses_NDArray}");
-        Debug.Log("poses shape: (" + string.Join(", ", poses_NDArray.shape)+")");
-        Debug.Log($"trans: {trans_NDArray}");
-        Debug.Log("trans shape: (" + string.Join(", ", trans_NDArray.shape)+")");
-        Debug.Log($"fps: {fps_NDArray}");
-        if(fps_NDArray!=null)
-        {
-            Debug.Log("fps shape: (" + string.Join(", ", fps_NDArray.shape)+")");
-        }
+        // Debug.Log($"betas: {shapes_NDArray}");
+        // Debug.Log("betas shape: (" + string.Join(", ", shapes_NDArray.shape)+")");
+        // Debug.Log($"poses: {poses_NDArray}");
+        // Debug.Log("poses shape: (" + string.Join(", ", poses_NDArray.shape)+")");
+        // Debug.Log($"trans: {trans_NDArray}");
+        // Debug.Log("trans shape: (" + string.Join(", ", trans_NDArray.shape)+")");
+        // Debug.Log($"fps: {fps_NDArray}");
+        // if(fps_NDArray.shape.Length == 0)
+        // {
+        //     Debug.Log("fps shape: (" + string.Join(", ", fps_NDArray.shape)+")");
+        // }
         
-        return (poses_NDArray,shapes_NDArray,trans_NDArray,fps_NDArray);
+        return (poses_NDArray,shapes_NDArray,trans_NDArray,fps_value);
     }
 }

@@ -324,6 +324,7 @@ class BodyPoseTcpClient:
         if mask & selectors.EVENT_WRITE:
             if not self.is_producer:
                 return True
+            print(f"data_to_transmit: {data_to_transmit}")
             to_transmit = data_to_transmit
             if not isinstance(to_transmit, np.ndarray):
                 to_transmit = np.zeros((178,), dtype=np.float32)
