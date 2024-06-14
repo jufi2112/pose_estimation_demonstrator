@@ -40,8 +40,8 @@ public class TcpPuppeteer : MonoBehaviour
     [Tooltip("Port of the TCP server to which the client should connect.")]
     public int m_tcpPort = 7777;
     public bool m_connectAtStart = true;
-    [Tooltip("Body ID (4 bytes) + translation (3 * 4 bytes) + pose (165 * 4 bytes) = 676 bytes.")]
-    public int m_messageLengthBytes = 676;
+    [Tooltip("Body ID (4 bytes) + translation (3 * 4 bytes) + shape (10 * 4 bytes) + pose (165 * 4 bytes) = 716 bytes.")]
+    public int m_messageLengthBytes = 716;
     [Tooltip("Time in seconds to wait for the TCP listener script to gracefully shut down. After this time has passed, Abort is called.")]
     public int m_threadCloseGracePeriodSeconds = 3;
     [Tooltip("Whether information about the transmission frequency of the body parameters should be shown.")]
@@ -71,20 +71,25 @@ public class TcpPuppeteer : MonoBehaviour
         Dictionary<int, Dictionary<string, float[]>> buffer;
         lock (locker_nextBodyInformation)
         {
+            // Only one frame
             buffer = new Dictionary<int, Dictionary<string, float[]>>(m_nextBodyInformation);
         }
         foreach (KeyValuePair<int, Dictionary<string, float[]>> entry in buffer)
         {
+            // Checkt wheather the trans and pose information are applied.
             if (m_appliedBodyInformation.ContainsKey(entry.Key))
             {
                 if ((ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["transl"], entry.Value["transl"])) &&
+                    (ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["shape"], entry.Value["shape"])) &&
                     (ArraysEqual<float>(m_appliedBodyInformation[entry.Key]["pose"], entry.Value["pose"])))
                     continue;
             }
             // Notify registered bodies of new translation and / or pose
             List<TcpControlledBody> subscribers;
+            Debug.Log($"m_registeredBodies: {string.Join(",",m_registeredBodies.Keys)}");
             if (m_registeredBodies.TryGetValue(entry.Key, out subscribers))
             {
+                Debug.Log($"Body registered {entry.Key}");
                 // Vector from initial position to current position with respect to the streamed data
                 Vector3 initBodyPosition;
                 lock (locker_initialBodyPositionData)
@@ -94,12 +99,15 @@ public class TcpPuppeteer : MonoBehaviour
                 Vector3 translationDifferenceData = new Vector3(entry.Value["transl"][0], entry.Value["transl"][1], entry.Value["transl"][2]) - initBodyPosition;
                 foreach (TcpControlledBody sub in subscribers)
                 {
-                    sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
+                    sub.SetParameters(translationDifferenceData, entry.Value["pose"], entry.Value["shape"]);
+                    // sub.SetParameters(translationDifferenceData, entry.Value["pose"]);
                 }
             }
+            // Update the applied body information.
             m_appliedBodyInformation[entry.Key] = new Dictionary<string, float[]>
             {
                 ["transl"] = entry.Value["transl"],
+                ["shape"] = entry.Value["shape"],
                 ["pose"] = entry.Value["pose"]
             };
         }
@@ -107,6 +115,7 @@ public class TcpPuppeteer : MonoBehaviour
 
     public bool RegisterBody(GameObject interestedBodyGameObject, int bodyID)
     {
+        Debug.Log($"registering body-{bodyID}");
         if (!m_registeredBodies.ContainsKey(bodyID))
         {
             m_registeredBodies.Add(bodyID, new List<TcpControlledBody>());
@@ -174,6 +183,7 @@ public class TcpPuppeteer : MonoBehaviour
         {
             m_socketConnection = new TcpClient(m_tcpIP, m_tcpPort); // Connection to Tcp Client.
             Byte[] bytes = new Byte[m_messageLengthBytes]; // Data length: Body ID (4 bytes) + translation (3 * 4 bytes) + pose (165 * 4 bytes) = 676 bytes
+            Debug.Log($"bytes.Length: {bytes.Length}");
             while (!m_stopThread)
             {
                 if (m_socketConnection == null) // No connection to tcp client, then do nothing.
@@ -191,7 +201,8 @@ public class TcpPuppeteer : MonoBehaviour
                             Debug.Log("Unable to read " + m_messageLengthBytes + " bytes (received " + bytesRead + " bytes instead), skipping message");
                             continue;
                         }
-                        (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
+                        (int bodyID, float[] transl, float[] shape, float[] pose) = DeserializeNumpyStream<float>(bytes);
+                        // (int bodyID, float[] transl, float[] pose) = DeserializeNumpyStream<float>(bytes);
                         if (m_transmissionStopwatches.ContainsKey(bodyID))
                         {
                             double time_passed = m_transmissionStopwatches[bodyID].Elapsed.TotalSeconds;
@@ -224,6 +235,7 @@ public class TcpPuppeteer : MonoBehaviour
                             m_nextBodyInformation[bodyID] = new Dictionary<string, float[]>
                             {
                                 ["transl"] = transl,
+                                ["shape"] = shape,
                                 ["pose"] = pose
                             };
                         }
@@ -268,14 +280,19 @@ public class TcpPuppeteer : MonoBehaviour
             Debug.Log("Socket exception: " + socketException);
         }
     }
-    private (int, T[], T[]) DeserializeNumpyStream<T>(byte[] bytes)
+    private (int, T[], T[], T[]) DeserializeNumpyStream<T>(byte[] bytes)
+    // private (int, T[], T[]) DeserializeNumpyStream<T>(byte[] bytes)
     {
         int bodyID = DeserializeBodyID(bytes); 
         T[] transl = new T[12 / Marshal.SizeOf(typeof(T))];
+        T[] shape = new T[40 / Marshal.SizeOf(typeof(T))];
         T[] pose = new T[660 / Marshal.SizeOf(typeof(T))];
         Buffer.BlockCopy(bytes, 4, transl, 0, 12);
-        Buffer.BlockCopy(bytes, 16, pose, 0, 660);
-        return (bodyID, transl, pose);
+        Buffer.BlockCopy(bytes, 16, shape, 0, 40);
+        Buffer.BlockCopy(bytes, 56, pose, 0, 660);
+        return (bodyID, transl, shape, pose);
+        // Buffer.BlockCopy(bytes, 16, pose, 0, 660);
+        // return (bodyID, transl, pose);
     }
 
     private int DeserializeBodyID(byte[] bytes)

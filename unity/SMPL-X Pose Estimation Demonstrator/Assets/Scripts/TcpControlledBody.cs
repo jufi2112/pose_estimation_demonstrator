@@ -12,6 +12,7 @@ public class TcpControlledBody : MonoBehaviour
     private bool m_setupComplete = false;
     private SMPLX m_smplxScript = null;
     private TcpPuppeteer m_tcpPuppeteerScript = null;
+    private PoseStationTest m_poseStationScript = null;
     // Angle between SMPL-X default rotation (defaults to 180 degrees) and the direction the body should face (determined by its y rotation when placed into the scene)
     private float m_bodyRootAngularDifferenceY = 0.0f;
     // Matrix that holds the rotation of the body from default SMPL-X facing direction to the direction the body faces at the start of the scene
@@ -59,7 +60,6 @@ public class TcpControlledBody : MonoBehaviour
                 GameObject[] freeViewCams = GameObject.FindGameObjectsWithTag("Free_Camera");
                 if (freeViewCams.Length > 0)
                 {
-                    Debug.Log("Detected Free_Camera: " + freeViewCams.Length);
                     m_freeCamera = freeViewCams[0].gameObject.GetComponent<Camera>();
                 }
                 else
@@ -99,11 +99,19 @@ public class TcpControlledBody : MonoBehaviour
         m_bodyRootAngularDifferenceY = DetermineAngularDifferenceY();
 
         m_smplxScript = gameObject.GetComponent<SMPLX>();
+
         // register at "puppeteer" to receive translation and pose updates for the specific body ID
-        GameObject obj = GameObject.FindWithTag("TCP_Puppeteer");
-        if (obj != null)
+        
+
+        GameObject tcp_puppeteer = GameObject.FindWithTag("TCP_Puppeteer");
+        if (tcp_puppeteer != null)
         {
-            m_tcpPuppeteerScript = obj.GetComponent<TcpPuppeteer>();
+            m_tcpPuppeteerScript = tcp_puppeteer.GetComponent<TcpPuppeteer>();
+        }
+        GameObject pose_station = GameObject.FindWithTag("Pose_Station");
+        if (pose_station != null)
+        {
+            m_poseStationScript = pose_station.GetComponent<PoseStationTest>();
         }
         if (m_tcpPuppeteerScript is null)
         {
@@ -112,8 +120,21 @@ public class TcpControlledBody : MonoBehaviour
         else
         {
             if (m_connectOnStart)
+            {
                 RegisterAtPuppeteer();
+            }
+        }      
+        if(m_poseStationScript is null)
+        {
+            Debug.Log(gameObject.name + " could not find a valid PoseStationTest instance.");
         }
+        else
+        {
+            if (m_connectOnStart)
+            {
+                RegisterAtPoseStation();
+            }
+        }        
     }
 
     // Update is called once per frame
@@ -143,13 +164,19 @@ public class TcpControlledBody : MonoBehaviour
     {
         if (m_tcpPuppeteerScript != null)
         {
-            bool unregisterSuccess = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
-            if (!unregisterSuccess)
-                Debug.Log("Could not unregister from the puppeteer");
+            bool unregisterSuccess_tcpPuppeteer = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
+            if (!unregisterSuccess_tcpPuppeteer)
+                Debug.Log("Could not unregister " + gameObject.name + " from the puppeteer!");
+        }
+        if (m_poseStationScript != null)
+        {
+            bool unregisterSuccess_PoseStation = m_poseStationScript.UnregisterBody(gameObject, m_interestedBodyID);
+            if (!unregisterSuccess_PoseStation)
+                Debug.Log("Could not unregister " + gameObject.name + " from the PoseStation!");
         }
     }
 
-    public void SetParameters(Vector3 positionDifferenceData, float[] bodyPose)
+    public void SetParameters(Vector3 positionDifferenceData, float[] bodyPose, float[] bodyShape)
     {
         if (!m_setupComplete)
         {
@@ -168,7 +195,8 @@ public class TcpControlledBody : MonoBehaviour
         Vector4 homPositionDiff = new Vector4(positionDifferenceData.x, positionDifferenceData.y, positionDifferenceData.z, 1.0f);
         Vector3 rotatedPosDiff = m_homRotMat * homPositionDiff;
         gameObject.transform.position = m_initialPosition + rotatedPosDiff;
-        bool status = SetBodyPose(bodyPose);
+        bool status = SetBodyShape(bodyShape);
+        status = SetBodyPose(bodyPose);
     }
 
     public bool RegisterAtPuppeteer()
@@ -177,16 +205,30 @@ public class TcpControlledBody : MonoBehaviour
         {
             bool registerSuccess = m_tcpPuppeteerScript.RegisterBody(gameObject, m_interestedBodyID);
             if (!registerSuccess)
-                Debug.Log("Could not register at the puppeteer, puppeteer returned an error");
+                Debug.Log("Could not register " + gameObject.name + " at the puppeteer because it returned an error");
             return registerSuccess;
         }
         else
         {
-            Debug.Log("Could not register at the Puppeteer as no matching script could be found.");
+            Debug.Log("Could not register " + gameObject.name + " at the Puppeteer, as no matching script could be found.");
             return false;
         }
     }
-
+        public bool RegisterAtPoseStation()
+    {
+        if (m_poseStationScript != null)
+        {
+            bool registerSuccess = m_poseStationScript.RegisterBody(gameObject, m_interestedBodyID);
+            if (!registerSuccess)
+                Debug.Log("Could not register at the PoseStation, PoseStation returned an error");
+            return registerSuccess;
+        }
+        else
+        {
+            Debug.Log("Could not register at the PoseStation as no matching script could be found.");
+            return false;
+        }
+    }
     private Matrix4x4 BuildHomogeneousRotationMatrixY(float rotationAngleDeg)
     {
         Matrix4x4 mat = Matrix4x4.identity;
@@ -211,7 +253,7 @@ public class TcpControlledBody : MonoBehaviour
         }
         if (pose.Length != 165)
         {
-            Debug.Log("Could not set body pose: The given array does not have 165 elements!");
+            Debug.Log(gameObject.name + ": Could not set body pose: The given array does not have 165 elements!");
             return false;
         }
         for (int i = 0; i < 55; ++i)
@@ -228,7 +270,22 @@ public class TcpControlledBody : MonoBehaviour
         return true;
     }
 
-    // Find and assign every gameobject with it's own pov_camera.
+    private bool SetBodyShape(float[] shape)
+    {
+        if (m_smplxScript == null)
+        {
+            return false;
+        }
+        if (shape.Length != 10)
+        {
+            Debug.Log(gameObject.name + ": Could not set body shape: The given array does not contain 10 elements!");
+            return false;
+        }
+        m_smplxScript.betas = shape;
+        m_smplxScript.SetBetaShapes();
+        return true;
+    }
+
     private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)
     {
         for (int i = 0; i < parent.childCount; ++i)

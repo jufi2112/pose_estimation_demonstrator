@@ -5,20 +5,33 @@ using System.Net.Sockets;
 using System.Text;
 using System.IO;
 using System.Threading;
+using System.Linq;
 using System;
 //// Support for reading .npz
 using Ionic.Zip;
-using ns = NumSharp;
 using np = Numpy;
 
 public class PoseStationTest : MonoBehaviour
 {
     private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
     private bool single_shape_paramenters = true;
-    private Numpy.NDarray poses;
-    private Numpy.NDarray shapes;
-    private Numpy.NDarray transl;
+
+    // dict that stores for each body ID the interested body instances
+    Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
+    
+    private readonly System.Object locker_initialBodyPositionData = new System.Object();
+
+    // Flag for wheather loaded the target npz file
+    public bool load_npz_success = false;
+    private Numpy.NDarray poses = Numpy.np.empty(new int[] {0});
+    private Numpy.NDarray shapes = Numpy.np.empty(new int[] {0});
+    private Numpy.NDarray transls = Numpy.np.empty(new int[] {0});
     private float fps = -1;
+    private int num_frames = -1;
+    private int playing_frame_index = 0;
+    Vector3 m_initialBodyPositionsData;
+    private int n_shape_components = 10;
+
     // Start is called before the first frame update
     void Start()
     {        
@@ -29,30 +42,68 @@ public class PoseStationTest : MonoBehaviour
 
         if (File.Exists(npz_file))
         {
-           (poses,shapes,transl,fps) = _load_npz_attribute(npz_file, "poses", "betas", "trans", "mocap_frame_rate");
-            // Debug.Log("poses: " + string.Join(",", poses_array));
-            // Debug.Log("shapes: " + string.Join(",", shapes_array));
-            // Debug.Log("transl: " + string.Join(",", transl_array));
-            // Debug.Log("mocap_fps: " + mocap_fps);
-            // Debug.Log($"poses rank: {poses_array.Rank}");
+                        
+            (poses,shapes,transls,fps) = _load_npz_attribute(npz_file, "poses", "betas", "trans", "mocap_frame_rate");
+            num_frames = poses.shape[0];
+            float[] trans =  get_frame(0,transls);
+
+            lock(locker_initialBodyPositionData)
+            {
+                m_initialBodyPositionsData = new Vector3(trans[0],trans[2],trans[1]);
+            }
+            Application.targetFrameRate = (int)fps;
+
         }
         else
         {
             Debug.Log("File not found at path: " + npz_file);
         }
-        
 
     }
+    
+    void OnDestroy()
+    {
+        poses.Dispose();
+    }
+
     void Update()
     {
-        
+        // one frame data ready for rendering
+        float[] shape = new float[10];
+
+        (float[] pose,float[] trans) = load_one_frame(poses,transls,playing_frame_index);
+        trans = _swap_translation_yz_axes_single(trans);
+        if(single_shape_paramenters)
+        {
+            shape = get_shape_single(shapes);
+        }
+        List<TcpControlledBody> subscribers;
+        if(m_registeredBodies.TryGetValue(1, out subscribers))
+        {
+            Vector3 initBodyPosition;
+            lock(locker_initialBodyPositionData)
+            {
+                initBodyPosition = m_initialBodyPositionsData;
+            }
+            Vector3 translationDifferenceData = new Vector3(trans[0],trans[1],trans[2]) - initBodyPosition;
+            foreach (TcpControlledBody sub in subscribers)
+            {
+                sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose,-90),180), _adapt_betas_shape(shape));
+            }
+        }
+        playing_frame_index++;
+        if(playing_frame_index >= num_frames)
+        {
+            playing_frame_index = 0;
+        }
     }
+
+    // Load the npz attributes.
     (Numpy.NDarray, Numpy.NDarray, Numpy.NDarray, float) _load_npz_attribute(string npz_file, 
         string pose_attribute, string shape_attribute, 
         string transl_attribute, string capture_fps_attribute)
     {
-        Dictionary<string, object> contents = new Dictionary<string, object>();
-
+        // Prepare the file paths
         string npz_name = Path.GetFileNameWithoutExtension(npz_file);
         Debug.Log($"npz_name: {npz_name}" );
         string extract_path = Path.Combine(Application.dataPath, "Dataset", npz_name);
@@ -61,6 +112,7 @@ public class PoseStationTest : MonoBehaviour
         string trans_path = Path.Combine(extract_path, "trans.npy");
         string fps_path = Path.Combine(extract_path, "mocap_frame_rate.npy");
         
+        // Update the body pose informations
         if (File.Exists(poses_path))
         {
             File.Delete(poses_path);
@@ -118,6 +170,10 @@ public class PoseStationTest : MonoBehaviour
         {
             return (Numpy.np.empty(new int[] {0}), Numpy.np.empty(new int[] {0}), Numpy.np.empty(new int[] {0}), -1);
         }
+        else
+        {
+            load_npz_success = true;
+        }
 
         // Every attribute exsits, read them.
         var shapes_NDArray = np.np.load(betas_path);
@@ -152,5 +208,161 @@ public class PoseStationTest : MonoBehaviour
         // }
         
         return (poses_NDArray,shapes_NDArray,trans_NDArray,fps_value);
+    }
+
+
+    // Read one frame from poses and trans, which ready to align to the 3D model
+    (float[], float[]) load_one_frame(Numpy.NDarray poses, Numpy.NDarray trans, int frame_index)
+    {
+        // float[] pose_frame = _add_x_angle_offset_to_pose(get_frame(frame_index,poses), -90f);
+        float[] pose_frame = get_frame(frame_index,poses);
+        // float[] trans_frame = _swap_translation_yz_axes_single(get_frame(frame_index, trans));
+        float[] trans_frame = get_frame(frame_index, trans);
+
+        return (pose_frame, trans_frame);
+    }
+    // Get one frame data of pose/trans
+    float[] get_frame(int frame_index, Numpy.NDarray datas)
+    {
+        List<float> frame = new List<float>();
+
+        int frame_length = datas.shape[1];
+        for(int i=0;i<frame_length; i++)
+        {
+            frame.Add(datas[frame_index,i].asscalar<float>());
+        }
+        
+        return frame.ToArray();
+    }
+    float[] get_shape_single(Numpy.NDarray shapes)
+    {
+        List<float> datas = new List<float>();
+        
+        for(int i=0;i<shapes.shape[0];i++)
+        {
+            datas.Add(shapes[i].asscalar<float>());
+        }
+        
+        return datas.ToArray();
+    }
+    float[] _adapt_betas_shape(float[] shape)
+    {
+        int delta_shape = n_shape_components - shape.Length;
+        float[] res = null;
+
+        if(delta_shape == 0)
+        {
+            res = shape;
+        }
+        else if(delta_shape > 0)
+        {
+            for(int i=0;i<delta_shape;i++)
+            {
+                shape[shape.Length+i]=0;
+            }
+            res = shape;
+        }
+        else if(delta_shape < 0){
+            res = shape.Take(n_shape_components).ToArray();
+        }
+        return res;
+    }
+    float[] _add_x_angle_offset_to_pose(float[] pose, float x_rot_angle_deg)
+    {        
+        Vector3 rotation_vector = new Vector3(pose[0], pose[1], pose[2]);
+        Quaternion quat = FromRotationVector(rotation_vector);
+        Quaternion rotX = FromRotationVector(new Vector3(x_rot_angle_deg*Mathf.Deg2Rad, 0, 0));
+        Vector3 rotated = AsRotationVector(rotX * quat);
+
+        pose[0] = rotated.x;
+        pose[1] = rotated.y;
+        pose[2] = rotated.z;
+
+        return pose;
+    }
+        float[] _add_y_angle_offset_to_pose(float[] pose, float x_rot_angle_deg)
+    {        
+        Vector3 rotation_vector = new Vector3(pose[0], pose[1], pose[2]);
+        Quaternion quat = FromRotationVector(rotation_vector);
+        Quaternion rotX = FromRotationVector(new Vector3(0, x_rot_angle_deg*Mathf.Deg2Rad, 0));
+        Vector3 rotated = AsRotationVector(rotX * quat);
+
+        pose[0] = rotated.x;
+        pose[1] = rotated.y;
+        pose[2] = rotated.z;
+
+        return pose;
+    }
+    // turn rotation vector into a quaternion.
+    public static Quaternion FromRotationVector(Vector3 rotationVector)
+    {
+        float angle = rotationVector.magnitude;
+        if (angle == 0)
+        {
+            return Quaternion.identity;
+        }
+
+        Vector3 axis = rotationVector.normalized;
+        float halfAngle = angle / 2.0f;
+        float sinHalfAngle = Mathf.Sin(halfAngle);
+
+        return new Quaternion(
+            axis.x * sinHalfAngle,
+            axis.y * sinHalfAngle,
+            axis.z * sinHalfAngle,
+            Mathf.Cos(halfAngle)
+        );
+    }
+
+    // turn a quaternion into a rotation vector
+    public static Vector3 AsRotationVector(Quaternion q)
+    {
+        if (q == Quaternion.identity)
+        {
+            return Vector3.zero;
+        }
+
+        q = q.normalized;
+        float angle = 2.0f * Mathf.Acos(q.w);
+        float sinHalfAngle = Mathf.Sqrt(1.0f - q.w * q.w);
+
+        if (sinHalfAngle < 0.001f) // 处理极小角度情况
+        {
+            return new Vector3(q.x, q.y, q.z);
+        }
+        else
+        {
+            return new Vector3(q.x / sinHalfAngle * angle, q.y / sinHalfAngle * angle, q.z / sinHalfAngle * angle);
+        }
+    }
+    float[] _swap_translation_yz_axes_single(float[] trans)
+    {
+        return new float[] {trans[0], trans[2], trans[1]};
+    }
+
+    public bool RegisterBody(GameObject interestedBodyGameObject, int bodyID)
+    {
+        if (!m_registeredBodies.ContainsKey(bodyID))
+        {
+            m_registeredBodies.Add(bodyID, new List<TcpControlledBody>());
+        }
+        TcpControlledBody interestedBody = interestedBodyGameObject.GetComponent<TcpControlledBody>();
+        if (interestedBody == null)
+            return false;
+        if (!m_registeredBodies[bodyID].Contains(interestedBody))
+        {
+            m_registeredBodies[bodyID].Add(interestedBody);
+        }
+        return true;
+    }
+
+    public bool UnregisterBody(GameObject bodyToUnregisterGameObject, int bodyID)
+    {
+        if (!m_registeredBodies.ContainsKey(bodyID))
+            return false;
+        TcpControlledBody bodyToUnregister = bodyToUnregisterGameObject.GetComponent<TcpControlledBody>();
+        if (bodyToUnregister == null)
+            return false;
+        return m_registeredBodies[bodyID].Remove(bodyToUnregister);
     }
 }

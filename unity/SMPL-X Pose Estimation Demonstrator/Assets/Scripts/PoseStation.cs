@@ -8,7 +8,6 @@ using System.Threading;
 using System;
 //// Support for reading .npz
 using Ionic.Zip;
-using NumSharp;
 //using Numpy;
 
 public class PoseStation : MonoBehaviour

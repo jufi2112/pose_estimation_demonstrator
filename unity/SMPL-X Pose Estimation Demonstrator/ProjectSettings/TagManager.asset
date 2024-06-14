@@ -7,6 +7,7 @@ TagManager:
   - TCP_Puppeteer
   - PoV_Camera
   - Free_Camera
+  - Pose_Station
   layers:
   - Default
   - TransparentFX
