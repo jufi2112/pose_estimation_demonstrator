@@ -1,0 +1,24 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2011/10/nuspec.xsd">
+  <metadata>
+    <id>DotNetZip</id>
+    <version>1.13.3</version>
+    <title>DotNetZip</title>
+    <authors>Henrik/Dino Chiesa</authors>
+    <licenseUrl>https://raw.githubusercontent.com/haf/DotNetZip.Semverd/master/LICENSE</licenseUrl>
+    <projectUrl>https://github.com/haf/DotNetZip.Semverd</projectUrl>
+    <description>A fork of the DotNetZip project without signing with a solution that compiles cleanly. This project aims to follow semver to avoid versioning conflicts. DotNetZip is a FAST, FREE class library and toolset for manipulating zip files. Use VB, C# or any .NET language to easily create, extract, or update zip files.</description>
+    <summary>A library for dealing with zip, bzip and zlib from .Net</summary>
+    <releaseNotes>Full version: 1.13.3.506f11.</releaseNotes>
+    <copyright>Dino Chiesa</copyright>
+    <language>en-GB</language>
+    <dependencies>
+      <group targetFramework="net40" />
+      <group targetFramework="netstandard2.0">
+        <dependency id="System.Security.Permissions" version="[4.5.0,5.0.0)" />
+        <dependency id="System.Text.Encoding.CodePages" version="[4.5.0,5.0.0)" />
+        <dependency id="System.Text.Encoding.Extensions" version="[4.3.0,5.0.0)" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

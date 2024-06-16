@@ -13,7 +13,7 @@ public class HideShowUI : MonoBehaviour
     private void Start()
     {
         //GameObject controlUIObject = GameObject.Find("Complete XR Origin Set Up/XR Origin/LeftHand (Smooth locomotion)/Control_UI");
-        GameObject controlUIObject = GameObject.Find("Control_UI");
+        GameObject controlUIObject = GameObject.Find("PlayerTable");
         
         if(controlUIObject != null)
         {

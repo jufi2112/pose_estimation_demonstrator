@@ -12,7 +12,7 @@ public class TcpControlledBody : MonoBehaviour
     private bool m_setupComplete = false;
     private SMPLX m_smplxScript = null;
     private TcpPuppeteer m_tcpPuppeteerScript = null;
-    private PoseStationTest m_poseStationScript = null;
+    private PoseStation m_poseStationScript = null;
     // Angle between SMPL-X default rotation (defaults to 180 degrees) and the direction the body should face (determined by its y rotation when placed into the scene)
     private float m_bodyRootAngularDifferenceY = 0.0f;
     // Matrix that holds the rotation of the body from default SMPL-X facing direction to the direction the body faces at the start of the scene
@@ -52,6 +52,8 @@ public class TcpControlledBody : MonoBehaviour
         Cursor.lockState = CursorLockMode.Locked;
         Transform parent = transform;
         FindAndAssignPOVCameraByTag(parent, "PoV_Camera");
+        Debug.Log($"gameobject: {gameObject.name}, m_belongsToLocalPlayer:{m_belongsToLocalPlayer}");
+        Debug.Log($"m_povCam == null : {m_povCam == null}");
         if (m_belongsToLocalPlayer)
         {
             m_playerInput = gameObject.GetComponent<PlayerInput>();
@@ -67,6 +69,8 @@ public class TcpControlledBody : MonoBehaviour
                     Debug.Log("No free view camera reference specified for " + gameObject.name + " and could not find a free view camera in the scene.");
                 }
             }
+            
+            Debug.Log($"m_freeCamera != null : {m_freeCamera != null}");
             if (m_povCam == null)
             {
                 Debug.Log("Could not find a valid PoV Camera for " + gameObject.name);
@@ -101,8 +105,6 @@ public class TcpControlledBody : MonoBehaviour
         m_smplxScript = gameObject.GetComponent<SMPLX>();
 
         // register at "puppeteer" to receive translation and pose updates for the specific body ID
-        
-
         GameObject tcp_puppeteer = GameObject.FindWithTag("TCP_Puppeteer");
         if (tcp_puppeteer != null)
         {
@@ -111,7 +113,7 @@ public class TcpControlledBody : MonoBehaviour
         GameObject pose_station = GameObject.FindWithTag("Pose_Station");
         if (pose_station != null)
         {
-            m_poseStationScript = pose_station.GetComponent<PoseStationTest>();
+            m_poseStationScript = pose_station.GetComponent<PoseStation>();
         }
         if (m_tcpPuppeteerScript is null)
         {
@@ -162,6 +164,8 @@ public class TcpControlledBody : MonoBehaviour
 
     void OnDestroy()
     {
+        m_freeCamera = null;
+        m_povCam = null;
         if (m_tcpPuppeteerScript != null)
         {
             bool unregisterSuccess_tcpPuppeteer = m_tcpPuppeteerScript.UnregisterBody(gameObject, m_interestedBodyID);
@@ -214,7 +218,7 @@ public class TcpControlledBody : MonoBehaviour
             return false;
         }
     }
-        public bool RegisterAtPoseStation()
+    public bool RegisterAtPoseStation()
     {
         if (m_poseStationScript != null)
         {
@@ -239,12 +243,10 @@ public class TcpControlledBody : MonoBehaviour
         mat[2, 2] = Mathf.Cos(rotationRad);
         return mat;
     }
-
     private float DetermineAngularDifferenceY()
     {
         return m_smplxDefaultRotationY - gameObject.transform.localRotation.eulerAngles.y;
     }
-
     private bool SetBodyPose(float[] pose)
     {
         if (m_smplxScript == null)
@@ -269,7 +271,6 @@ public class TcpControlledBody : MonoBehaviour
         m_smplxScript.UpdateJointPositions(true);
         return true;
     }
-
     private bool SetBodyShape(float[] shape)
     {
         if (m_smplxScript == null)
