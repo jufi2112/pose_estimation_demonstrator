@@ -1,41 +1,41 @@
-using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using System.Text;
 using System.IO;
 using System.Linq;
 using System;
 using Ionic.Zip;
-using Numpy;
+using NumSharp;
+using NumSharp.Utilities;
 
 public class PoseStation : MonoBehaviour
 {
-    private static string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
+    private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
+    private string dataset_path_relative = "./Dataset";
     private bool single_shape_paramenters = true;
 
     // dict that stores for each body ID the interested body instances
     Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
     
-    private string[] npz_files;
+    private List<string> npz_files = new List<string>();
     private readonly System.Object locker_initialBodyPositionData = new System.Object();
 
     // Flag for wheather loaded the target npz file
     public bool load_npz_success = false;
-    private NDarray poses = np.empty(new int[] {0});
-    private NDarray shapes = np.empty(new int[] {0});
-    private NDarray transls = np.empty(new int[] {0});
+    private NDArray poses = np.empty(new int[] {0});
+    private NDArray shapes = np.empty(new int[] {0});
+    private NDArray transls = np.empty(new int[] {0});
     private float fps = -1;
     private int num_frames = -1;
     private Vector3 m_initialBodyPositionsData;    
-    // private Dictionary<string, Numpy.NDarray> poses_dic = new Dictionary<string, Numpy.NDarray>();
-    // private Dictionary<string, Numpy.NDarray> shapes_dic = new Dictionary<string, Numpy.NDarray>();
-    // private Dictionary<string, Numpy.NDarray> transls_dic = new Dictionary<string, Numpy.NDarray>();
-    // private Dictionary<string, float> fps_dic = new Dictionary<string, float>();
-    // private Dictionary<string, int> num_frames_dic = new Dictionary<string, int>();
-    // private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
+    private Dictionary<string, NDArray> poses_dic = new Dictionary<string, NDArray>();
+    private Dictionary<string, NDArray> shapes_dic = new Dictionary<string, NDArray>();
+    private Dictionary<string, NDArray> transls_dic = new Dictionary<string, NDArray>();
+    private Dictionary<string, float> fps_dic = new Dictionary<string, float>();
+    private Dictionary<string, int> num_frames_dic = new Dictionary<string, int>();
+    private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
     
     private int playing_frame_index = 0;
-    private int n_shape_components = 10;
+    private int n_shape_components = 10;  
 
     /// @ Player controll parameters
     private int boost_rate = 1;
@@ -45,26 +45,56 @@ public class PoseStation : MonoBehaviour
     // Start is called before the first frame update
     void Start()
     {        
-        string projectRootPath = Application.dataPath;
-        string dataset_path_relative = "./Dataset";
+        string projectRootPath = Application.dataPath;  
+        
         string dataset_path = Path.GetFullPath(Path.Combine(projectRootPath, dataset_path_relative));
         
-        // if(Directory.Exists(dataset_path))
-        // {
-        //     npz_files = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly);
-        //     for (int i = 0; i < npz_files.Length; i++)
-        //     {
-        //         npz_files[i] = Path.GetFileNameWithoutExtension(npz_files[i]);
-        //     }
-        //     Debug.Log($"read:{string.Join(",",npz_files)}");
-        // }
-
-        // The whole path
-        string npz_file = Path.GetFullPath(Path.Combine(projectRootPath, relativePath));
-
-        if (File.Exists(npz_file))
+        if(Directory.Exists(dataset_path))
         {
-                        
+            string[] npz_files_paths = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly);
+            if (npz_files_paths.Length !=0)
+            {
+                for (int i = 0; i < npz_files_paths.Length; i++)
+                {
+                    if (File.Exists(npz_files_paths[i]))
+                    {
+                        npz_files.Add(Path.GetFileNameWithoutExtension(npz_files_paths[i]));
+                        (poses_dic[npz_files[i]], shapes_dic[npz_files[i]], transls_dic[npz_files[i]], fps_dic[npz_files[i]])
+                            = _load_npz_attribute(npz_files_paths[i], "poses", "betas", "trans", "mocap_frame_rate");
+                        num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
+                        float[] trans = get_frame(0, transls_dic[npz_files[i]]);
+                        lock (locker_initialBodyPositionData)
+                        {
+                            m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
+                        }
+                    }
+
+                }
+                Debug.Log("dic keys: " + string.Join(",", poses_dic.Keys));
+
+                poses = poses_dic[npz_files[0]];
+                shapes = shapes_dic[npz_files[0]];
+                transls = transls_dic[npz_files[0]];
+                fps = fps_dic[npz_files[0]];
+                num_frames = num_frames_dic[npz_files[0]];
+                m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[0]];
+                Application.targetFrameRate = (int)fps;
+            }
+            else
+            {
+                Debug.Log("No .npz file found in folder: " + dataset_path);
+            }
+            
+        }
+        else
+        {
+            Debug.Log("Directory not found at path: " + dataset_path);
+        }
+
+/*        // The whole path
+        string npz_file = Path.GetFullPath(Path.Combine(projectRootPath, relativePath));
+        if (File.Exists(npz_file))
+        {                        
             (poses,shapes,transls,fps) = _load_npz_attribute(npz_file, "poses", "betas", "trans", "mocap_frame_rate");
             num_frames = poses.shape[0];
             float[] trans =  get_frame(0,transls);
@@ -73,11 +103,12 @@ public class PoseStation : MonoBehaviour
                 m_initialBodyPositionsData = new Vector3(trans[0],trans[2],trans[1]);
             }
             Application.targetFrameRate = (int)fps;
+            Debug.Log("shapes: " + shapes.Shape[0]);
         }
         else
         {
             Debug.Log("File not found at path: " + npz_file);
-        }
+        }*/
 
     }
     void OnDestroy()
@@ -111,27 +142,195 @@ public class PoseStation : MonoBehaviour
             }
         }
 
+        /// @ replaying control logic here.
         if(continue_stop)
         {
-
             playing_frame_index += boost_rate;
         }
 
-        if(playing_frame_index >= num_frames-1)
+        if (forward_backward) // now forward playing
         {
-            playing_frame_index = num_frames-1;
-            continue_stop = false;
+            if (playing_frame_index >= num_frames - 1)
+            {
+                playing_frame_index = 0;
+                continue_stop = false;
+            }
+            
         }
-        else if (playing_frame_index <= 0)
+        else // now backward playing
         {
-            playing_frame_index = 0;
-            continue_stop = false;
+            if (playing_frame_index <= 0)
+            {
+                playing_frame_index = 0;
+                forward_backward = true;
+                continue_stop = false;
+            }
         }
+
+
     }
 
     /// @ Load body pose data 
+
+    /// @ Modification of Numsharp Load for single value .npy file
+    public static NDArray Load_Scalar_Npy(string path)
+    {
+        using (var stream = new FileStream(path, FileMode.Open))
+            return Load_Scalar_Npy(stream);
+    }
+    public static NDArray Load_Scalar_Npy(Stream stream)
+    {
+        using (var reader = new BinaryReader(stream, System.Text.Encoding.ASCII
+#if !NET35 && !NET40
+                , leaveOpen: true
+#endif
+            ))
+        {
+            int bytes;
+            Type type;
+            int[] shape;
+            if (!parseReader(reader, out bytes, out type, out shape))
+                throw new FormatException();
+
+            Array array;
+            if (shape.Length == 0)
+            {
+                array = Array.CreateInstance(type, 1);
+            }
+            else
+            {
+                array = Arrays.Create(type, shape.Aggregate((dims, dim) => dims * dim));
+            }
+
+            var result = new NDArray(readValueMatrix(reader, array, bytes, type, shape));
+            return result.reshape(shape);
+        }
+    }
+    private static bool parseReader(BinaryReader reader, out int bytes, out Type t, out int[] shape)
+    {
+        bytes = 0;
+        t = null;
+        shape = null;
+
+        // The first 6 bytes are a magic string: exactly "x93NUMPY"
+        if (reader.ReadChar() != 63) return false;
+        if (reader.ReadChar() != 'N') return false;
+        if (reader.ReadChar() != 'U') return false;
+        if (reader.ReadChar() != 'M') return false;
+        if (reader.ReadChar() != 'P') return false;
+        if (reader.ReadChar() != 'Y') return false;
+
+        byte major = reader.ReadByte(); // 1
+        byte minor = reader.ReadByte(); // 0
+
+        if (major != 1 || minor != 0)
+            throw new NotSupportedException();
+
+        ushort len = reader.ReadUInt16();
+
+        string header = new String(reader.ReadChars(len));
+        string mark = "'descr': '";
+        int s = header.IndexOf(mark) + mark.Length;
+        int e = header.IndexOf("'", s + 1);
+        string type = header.Substring(s, e - s);
+        bool? isLittleEndian;
+        t = GetType(type, out bytes, out isLittleEndian);
+
+        if (isLittleEndian.HasValue && isLittleEndian.Value == false)
+            throw new Exception();
+
+        mark = "'fortran_order': ";
+        s = header.IndexOf(mark) + mark.Length;
+        e = header.IndexOf(",", s + 1);
+        bool fortran = bool.Parse(header.Substring(s, e - s));
+
+        if (fortran)
+            throw new Exception();
+
+        mark = "'shape': (";
+        s = header.IndexOf(mark) + mark.Length;
+        e = header.IndexOf(")", s + 1);
+        if (e > 0)
+        {
+            shape = header.Substring(s, e - s).Split(',').Where(v => !String.IsNullOrEmpty(v)).Select(Int32.Parse).ToArray();
+        }
+        else
+        {
+            shape = new int[0];
+        }
+
+        return true;
+    }
+    private static Array readValueMatrix(BinaryReader reader, Array matrix, int bytes, Type type, int[] shape)
+    {
+        int total = 1;
+        for (int i = 0; i < shape.Length; i++)
+            total *= shape[i];
+        var buffer = new byte[bytes * total];
+
+        reader.Read(buffer, 0, buffer.Length);
+        Buffer.BlockCopy(buffer, 0, matrix, 0, buffer.Length);
+
+        return matrix;
+    }
+    private static Type GetType(string dtype, out int bytes, out bool? isLittleEndian)
+    {
+        isLittleEndian = IsLittleEndian(dtype);
+        bytes = Int32.Parse(dtype.Substring(2));
+
+        string typeCode = dtype.Substring(1);
+
+        if (typeCode == "b1")
+            return typeof(bool);
+        if (typeCode == "i1")
+            return typeof(Byte);
+        if (typeCode == "i2")
+            return typeof(Int16);
+        if (typeCode == "i4")
+            return typeof(Int32);
+        if (typeCode == "i8")
+            return typeof(Int64);
+        if (typeCode == "u1")
+            return typeof(Byte);
+        if (typeCode == "u2")
+            return typeof(UInt16);
+        if (typeCode == "u4")
+            return typeof(UInt32);
+        if (typeCode == "u8")
+            return typeof(UInt64);
+        if (typeCode == "f4")
+            return typeof(Single);
+        if (typeCode == "f8")
+            return typeof(Double);
+        if (typeCode.StartsWith("S"))
+            return typeof(String);
+
+        throw new NotSupportedException();
+    }
+    private static bool? IsLittleEndian(string type)
+    {
+        bool? littleEndian = null;
+
+        switch (type[0])
+        {
+            case '<':
+                littleEndian = true;
+                break;
+            case '>':
+                littleEndian = false;
+                break;
+            case '|':
+                littleEndian = null;
+                break;
+            default:
+                throw new Exception();
+        }
+
+        return littleEndian;
+    }
+
     // Load the npz attributes.
-    private (NDarray, NDarray, NDarray, float) _load_npz_attribute(string npz_file, 
+    private (NDArray, NDArray, NDArray, float) _load_npz_attribute(string npz_file, 
         string pose_attribute, string shape_attribute, 
         string transl_attribute, string capture_fps_attribute)
     {
@@ -220,30 +419,18 @@ public class PoseStation : MonoBehaviour
         }
         var poses_NDArray = np.load(poses_path);
         var trans_NDArray = np.load(trans_path);
-                
+
         float fps_value = -1;
         if(File.Exists(fps_path))
         {
-            NDarray fps_NDArray = np.load(fps_path);
-            fps_value = fps_NDArray.asscalar<float>();
+            NDArray fps_NDArray = Load_Scalar_Npy(fps_path);
+            fps_value = np.asscalar<float>(fps_NDArray);
         }
-
-        // Debug.Log($"betas: {shapes_NDArray}");
-        // Debug.Log("betas shape: (" + string.Join(", ", shapes_NDArray.shape)+")");
-        // Debug.Log($"poses: {poses_NDArray}");
-        // Debug.Log("poses shape: (" + string.Join(", ", poses_NDArray.shape)+")");
-        // Debug.Log($"trans: {trans_NDArray}");
-        // Debug.Log("trans shape: (" + string.Join(", ", trans_NDArray.shape)+")");
-        // Debug.Log($"fps: {fps_NDArray}");
-        // if(fps_NDArray.shape.Length == 0)
-        // {
-        //     Debug.Log("fps shape: (" + string.Join(", ", fps_NDArray.shape)+")");
-        // }
         
         return (poses_NDArray,shapes_NDArray,trans_NDArray,fps_value);
     }
     // Read one frame from poses and trans, which ready to align to the 3D model
-    private (float[], float[]) load_one_frame(NDarray poses, NDarray trans, int frame_index)
+    private (float[], float[]) load_one_frame(NDArray poses, NDArray trans, int frame_index)
     {
         // float[] pose_frame = _add_x_angle_offset_to_pose(get_frame(frame_index,poses), -90f);
         float[] pose_frame = get_frame(frame_index,poses);
@@ -253,31 +440,33 @@ public class PoseStation : MonoBehaviour
         return (pose_frame, trans_frame);
     }
     // Get one frame data of pose/trans
-    private float[] get_frame(int frame_index, NDarray datas)
+    private float[] get_frame(int frame_index, NDArray datas)
     {
         List<float> frame = new List<float>();
 
         int frame_length = datas.shape[1];
         for(int i=0;i<frame_length; i++)
         {
-            frame.Add(datas[frame_index,i].asscalar<float>());
+            frame.Add(np.asscalar<float>(datas[frame_index, i]));
+            // frame.Add(datas[frame_index,i].asscalar<float>()); // using Numpy.net
         }
         
         return frame.ToArray();
     }
-    private float[] get_shape_single(NDarray shapes)
+    private float[] get_shape_single(NDArray shapes)
     {
         List<float> datas = new List<float>();
         
         for(int i=0;i<shapes.shape[0];i++)
         {
-            datas.Add(shapes[i].asscalar<float>());
+            datas.Add(np.asscalar<float>(shapes[i]));
+            // datas.Add(shapes[i].asscalar<float>()); // using Numpy.net
         }
-        
         return datas.ToArray();
     }
     private float[] _adapt_betas_shape(float[] shape)
     {
+        Debug.Log("shape float[]: " + shape.Length);
         int delta_shape = n_shape_components - shape.Length;
         float[] res = null;
 
@@ -296,6 +485,8 @@ public class PoseStation : MonoBehaviour
         else if(delta_shape < 0){
             res = shape.Take(n_shape_components).ToArray();
         }
+
+        Debug.Log("adapt shape: " + res.Length);
         return res;
     }
     private float[] _add_x_angle_offset_to_pose(float[] pose, float x_rot_angle_deg)
@@ -311,12 +502,12 @@ public class PoseStation : MonoBehaviour
 
         return pose;
     }
-        float[] _add_y_angle_offset_to_pose(float[] pose, float x_rot_angle_deg)
+    float[] _add_y_angle_offset_to_pose(float[] pose, float y_rot_angle_deg)
     {        
         Vector3 rotation_vector = new Vector3(pose[0], pose[1], pose[2]);
         Quaternion quat = FromRotationVector(rotation_vector);
-        Quaternion rotX = FromRotationVector(new Vector3(0, x_rot_angle_deg*Mathf.Deg2Rad, 0));
-        Vector3 rotated = AsRotationVector(rotX * quat);
+        Quaternion rotY = FromRotationVector(new Vector3(0, y_rot_angle_deg*Mathf.Deg2Rad, 0));
+        Vector3 rotated = AsRotationVector(rotY * quat);
 
         pose[0] = rotated.x;
         pose[1] = rotated.y;
@@ -399,38 +590,44 @@ public class PoseStation : MonoBehaviour
     /// @ Replay functions (stop/continue, rewind, fast-forward)
     public void ContinueStop()
     {   
-        if (boost_rate != 1)
-        {
-            boost_rate = 1;
-        }
-        else
-        {
-            bool previous_play_state = continue_stop;
-            continue_stop = !continue_stop;
-        }
+        bool previous_play_state = continue_stop;
+        continue_stop = !continue_stop;
     }
     public bool get_continue_stop() { return continue_stop; }
     public void Rewind()
     {
-        bool success = false;
-        if(boost_rate > 0)
+        if(boost_rate > 1)
+        {
+            boost_rate = 1;
+            forward_backward = true;
+        }
+        else if(boost_rate == 1)
         {
             boost_rate = -1;
+            forward_backward = false;
         }
         else if (boost_rate >= -8 && boost_rate < 0)
         {
             boost_rate--;
+            forward_backward = false;
         }
     }
     public void FastForward()
     {
-        if(boost_rate < 0)
+        if(boost_rate < -1)
+        {
+            boost_rate = -1;
+            forward_backward = false;
+        }
+        else if (boost_rate == -1)
         {
             boost_rate = 1;
+            forward_backward = true;
         }
         else if (boost_rate <= 8 && boost_rate > 0)
         {
             boost_rate++;
+            forward_backward = true;
         }
     }
 

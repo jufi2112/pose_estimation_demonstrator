@@ -283,6 +283,8 @@ public class TcpControlledBody : MonoBehaviour
             return false;
         }
         m_smplxScript.betas = shape;
+        Debug.Log("in body shape: " + shape.Length);
+        Debug.Log("in body shape: " + string.Join(",",shape));
         m_smplxScript.SetBetaShapes();
         return true;
     }

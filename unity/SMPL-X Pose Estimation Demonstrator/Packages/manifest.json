@@ -1,7 +1,7 @@
 {
   "scopedRegistries": [],
   "dependencies": {
-    "com.unity.collab-proxy": "2.3.1",
+    "com.unity.adaptiveperformance": "5.1.0",
     "com.unity.feature.development": "1.0.1",
     "com.unity.ide.vscode": "1.2.5",
     "com.unity.inputsystem": "1.7.0",
