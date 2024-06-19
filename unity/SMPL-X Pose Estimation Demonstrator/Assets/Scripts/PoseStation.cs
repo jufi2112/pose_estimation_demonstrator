@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.UI;
 using System.IO;
 using System.Linq;
 using System;
@@ -24,6 +25,7 @@ public class PoseStation : MonoBehaviour
     private NDArray poses = np.empty(new int[] {0});
     private NDArray shapes = np.empty(new int[] {0});
     private NDArray transls = np.empty(new int[] {0});
+    // Hint record_time = num_frames / fps;
     private float fps = -1;
     private int num_frames = -1;
     private Vector3 m_initialBodyPositionsData;    
@@ -35,12 +37,14 @@ public class PoseStation : MonoBehaviour
     private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
     
     private int playing_frame_index = 0;
-    private int n_shape_components = 10;  
+    private int n_shape_components = 10;
+    private float playing_timer = 0.0f;
 
     /// @ Player controll parameters
     private int boost_rate = 1;
     private bool continue_stop = true; // true for continue, false for stop.
     private bool forward_backward = true; // true for forward, false for backward.
+    private Slider progress_slider;
 
     // Start is called before the first frame update
     void Start()
@@ -70,7 +74,6 @@ public class PoseStation : MonoBehaviour
                     }
 
                 }
-                Debug.Log("dic keys: " + string.Join(",", poses_dic.Keys));
 
                 poses = poses_dic[npz_files[0]];
                 shapes = shapes_dic[npz_files[0]];
@@ -78,7 +81,8 @@ public class PoseStation : MonoBehaviour
                 fps = fps_dic[npz_files[0]];
                 num_frames = num_frames_dic[npz_files[0]];
                 m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[0]];
-                Application.targetFrameRate = (int)fps;
+                // Application.targetFrameRate = (int)fps;
+                Debug.Log($"total time: {num_frames/fps}");
             }
             else
             {
@@ -91,35 +95,41 @@ public class PoseStation : MonoBehaviour
             Debug.Log("Directory not found at path: " + dataset_path);
         }
 
-/*        // The whole path
-        string npz_file = Path.GetFullPath(Path.Combine(projectRootPath, relativePath));
-        if (File.Exists(npz_file))
-        {                        
-            (poses,shapes,transls,fps) = _load_npz_attribute(npz_file, "poses", "betas", "trans", "mocap_frame_rate");
-            num_frames = poses.shape[0];
-            float[] trans =  get_frame(0,transls);
-            lock(locker_initialBodyPositionData)
-            {
-                m_initialBodyPositionsData = new Vector3(trans[0],trans[2],trans[1]);
-            }
-            Application.targetFrameRate = (int)fps;
-            Debug.Log("shapes: " + shapes.Shape[0]);
-        }
-        else
+        // Get Slider
+        progress_slider = GameObject.Find("MainProgressSlider").GetComponent<Slider>();
+        if (progress_slider == null)
         {
-            Debug.Log("File not found at path: " + npz_file);
-        }*/
+            Debug.Log($"in {this.name} MainProgressSlider not Found!");
+        }
+
 
     }
     void OnDestroy()
     {
-        // poses.Dispose();
-        // shapes.Dispose();
+        poses_dic.Clear();
+        shapes_dic.Clear();
+        transls_dic.Clear();
+        fps_dic.Clear();
+        num_frames_dic.Clear();
+        m_initialBodyPositionsData_dic.Clear();
+        m_registeredBodies.Clear();
+        poses = null;
+        shapes = null;
+        transls = null;
+
     }
     void Update()
     {
         // one frame data ready for rendering
         float[] shape = new float[16];
+        if (playing_frame_index == 0)
+        {
+            playing_timer = 0.0f;
+        }
+        if (continue_stop)
+        {
+            playing_timer += Time.deltaTime * boost_rate;
+        }
 
         (float[] pose,float[] trans) = load_one_frame(poses,transls,playing_frame_index);
         trans = _swap_translation_yz_axes_single(trans);
@@ -145,14 +155,17 @@ public class PoseStation : MonoBehaviour
         /// @ replaying control logic here.
         if(continue_stop)
         {
-            playing_frame_index += boost_rate;
+            //playing_frame_index += boost_rate;
+            playing_frame_index = calculate_frame_index(playing_timer, fps);
+            //update_slider(playing_frame_index);
         }
 
         if (forward_backward) // now forward playing
         {
             if (playing_frame_index >= num_frames - 1)
             {
-                playing_frame_index = 0;
+                playing_frame_index = num_frames-1;
+                //update_slider(playing_frame_index);
                 continue_stop = false;
             }
             
@@ -162,23 +175,23 @@ public class PoseStation : MonoBehaviour
             if (playing_frame_index <= 0)
             {
                 playing_frame_index = 0;
+                //update_slider(playing_frame_index);
                 forward_backward = true;
+                boost_rate = 1;
                 continue_stop = false;
             }
         }
-
-
     }
 
     /// @ Load body pose data 
 
     /// @ Modification of Numsharp Load for single value .npy file
-    public static NDArray Load_Scalar_Npy(string path)
+    private static NDArray Load_Scalar_Npy(string path)
     {
         using (var stream = new FileStream(path, FileMode.Open))
             return Load_Scalar_Npy(stream);
     }
-    public static NDArray Load_Scalar_Npy(Stream stream)
+    private static NDArray Load_Scalar_Npy(Stream stream)
     {
         using (var reader = new BinaryReader(stream, System.Text.Encoding.ASCII
 #if !NET35 && !NET40
@@ -336,7 +349,6 @@ public class PoseStation : MonoBehaviour
     {
         // Prepare the file paths
         string npz_name = Path.GetFileNameWithoutExtension(npz_file);
-        Debug.Log($"npz_name: {npz_name}" );
         string extract_path = Path.Combine(Application.dataPath, "Dataset", npz_name);
         string poses_path = Path.Combine(extract_path, "poses.npy");
         string betas_path = Path.Combine(extract_path, "betas.npy");
@@ -466,7 +478,6 @@ public class PoseStation : MonoBehaviour
     }
     private float[] _adapt_betas_shape(float[] shape)
     {
-        Debug.Log("shape float[]: " + shape.Length);
         int delta_shape = n_shape_components - shape.Length;
         float[] res = null;
 
@@ -486,7 +497,6 @@ public class PoseStation : MonoBehaviour
             res = shape.Take(n_shape_components).ToArray();
         }
 
-        Debug.Log("adapt shape: " + res.Length);
         return res;
     }
     private float[] _add_x_angle_offset_to_pose(float[] pose, float x_rot_angle_deg)
@@ -502,7 +512,7 @@ public class PoseStation : MonoBehaviour
 
         return pose;
     }
-    float[] _add_y_angle_offset_to_pose(float[] pose, float y_rot_angle_deg)
+    private float[] _add_y_angle_offset_to_pose(float[] pose, float y_rot_angle_deg)
     {        
         Vector3 rotation_vector = new Vector3(pose[0], pose[1], pose[2]);
         Quaternion quat = FromRotationVector(rotation_vector);
@@ -630,5 +640,43 @@ public class PoseStation : MonoBehaviour
             forward_backward = true;
         }
     }
+    private int calculate_frame_index(float timer, float frame_rate)
+    {
+        return (int)Math.Floor(timer * frame_rate);
+    }
+    public void pause()
+    {
+        continue_stop = false;
+    }
+    public void resume(bool last_play_state)
+    {
+        continue_stop = last_play_state;
+    }
+    public void set_playing_frame_index(int index)
+    {
+        playing_frame_index = index;
+        playing_timer = index / fps;
+    }
+    /// @ Functions for outer use
+    public int get_num_frames()
+    {
+        return num_frames;
+    }
+    public float get_fps()
+    {
+        return fps;
+    }
+    public int get_playing_frame_index() { return playing_frame_index; }
+    public void update_slider(int playing_frame_index)
+    {
+        progress_slider.value = playing_frame_index / fps;
+    }
+
+    public void update_play_frame(int new_frame_index)
+    {
+        playing_frame_index = new_frame_index;
+        playing_timer = new_frame_index / fps;
+    }
+
 
 }

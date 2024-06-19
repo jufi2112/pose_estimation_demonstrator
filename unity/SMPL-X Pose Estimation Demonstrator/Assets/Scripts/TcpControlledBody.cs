@@ -52,8 +52,6 @@ public class TcpControlledBody : MonoBehaviour
         Cursor.lockState = CursorLockMode.Locked;
         Transform parent = transform;
         FindAndAssignPOVCameraByTag(parent, "PoV_Camera");
-        Debug.Log($"gameobject: {gameObject.name}, m_belongsToLocalPlayer:{m_belongsToLocalPlayer}");
-        Debug.Log($"m_povCam == null : {m_povCam == null}");
         if (m_belongsToLocalPlayer)
         {
             m_playerInput = gameObject.GetComponent<PlayerInput>();
@@ -70,7 +68,6 @@ public class TcpControlledBody : MonoBehaviour
                 }
             }
             
-            Debug.Log($"m_freeCamera != null : {m_freeCamera != null}");
             if (m_povCam == null)
             {
                 Debug.Log("Could not find a valid PoV Camera for " + gameObject.name);
@@ -199,6 +196,7 @@ public class TcpControlledBody : MonoBehaviour
         Vector4 homPositionDiff = new Vector4(positionDifferenceData.x, positionDifferenceData.y, positionDifferenceData.z, 1.0f);
         Vector3 rotatedPosDiff = m_homRotMat * homPositionDiff;
         gameObject.transform.position = m_initialPosition + rotatedPosDiff;
+        //Debug.Log($"bodyshape[{bodyShape.Length}]: [{string.Join(",", bodyShape)}]");
         bool status = SetBodyShape(bodyShape);
         status = SetBodyPose(bodyPose);
     }
@@ -282,9 +280,8 @@ public class TcpControlledBody : MonoBehaviour
             Debug.Log(gameObject.name + ": Could not set body shape: The given array does not contain 10 elements!");
             return false;
         }
+        //Debug.Log($"SetBodyShape[{shape.Length}]: [{string.Join(",", shape)}]");
         m_smplxScript.betas = shape;
-        Debug.Log("in body shape: " + shape.Length);
-        Debug.Log("in body shape: " + string.Join(",",shape));
         m_smplxScript.SetBetaShapes();
         return true;
     }
