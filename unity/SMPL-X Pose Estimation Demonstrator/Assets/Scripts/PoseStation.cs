@@ -36,15 +36,18 @@ public class PoseStation : MonoBehaviour
     private Dictionary<string, int> num_frames_dic = new Dictionary<string, int>();
     private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
     
-    private int playing_frame_index = 0;
+    private int playing_frame_index = -1;
     private int n_shape_components = 10;
     private float playing_timer = 0.0f;
 
+    private int playing_file_index = 0;
+
     /// @ Player controll parameters
-    private int boost_rate = 1;
+    private float boost_rate = 1;
     private bool continue_stop = true; // true for continue, false for stop.
     private bool forward_backward = true; // true for forward, false for backward.
     private Slider progress_slider;
+    private Dropdown boost_rate_dropdown;
 
     // Start is called before the first frame update
     void Start()
@@ -55,7 +58,11 @@ public class PoseStation : MonoBehaviour
         
         if(Directory.Exists(dataset_path))
         {
-            string[] npz_files_paths = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly);
+            string[] npz_files_paths = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly).Where(file => !file.EndsWith(".meta")).ToArray();
+            foreach(var file in npz_files_paths)
+            {
+                Debug.Log("------" + file);
+            }
             if (npz_files_paths.Length !=0)
             {
                 for (int i = 0; i < npz_files_paths.Length; i++)
@@ -72,15 +79,13 @@ public class PoseStation : MonoBehaviour
                             m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
                         }
                     }
-
                 }
-
-                poses = poses_dic[npz_files[0]];
-                shapes = shapes_dic[npz_files[0]];
-                transls = transls_dic[npz_files[0]];
-                fps = fps_dic[npz_files[0]];
-                num_frames = num_frames_dic[npz_files[0]];
-                m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[0]];
+                poses = poses_dic[npz_files[playing_file_index]];
+                shapes = shapes_dic[npz_files[playing_file_index]];
+                transls = transls_dic[npz_files[playing_file_index]];
+                fps = fps_dic[npz_files[playing_file_index]];
+                num_frames = num_frames_dic[npz_files[playing_file_index]];
+                m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
                 // Application.targetFrameRate = (int)fps;
                 Debug.Log($"total time: {num_frames/fps}");
             }
@@ -95,13 +100,19 @@ public class PoseStation : MonoBehaviour
             Debug.Log("Directory not found at path: " + dataset_path);
         }
 
-        // Get Slider
+        // Get Main Progress Slider
         progress_slider = GameObject.Find("MainProgressSlider").GetComponent<Slider>();
         if (progress_slider == null)
         {
             Debug.Log($"in {this.name} MainProgressSlider not Found!");
         }
 
+        // Get Boost Rate Dropdown
+        boost_rate_dropdown = GameObject.Find("BoostRateDropdown").GetComponent<Dropdown>();
+        if (progress_slider == null)
+        {
+            Debug.Log($"in {this.name} BoostRateDropdown not Found!");
+        }
 
     }
     void OnDestroy()
@@ -120,17 +131,52 @@ public class PoseStation : MonoBehaviour
     }
     void Update()
     {
-        // one frame data ready for rendering
-        float[] shape = new float[16];
-        if (playing_frame_index == 0)
+        if (playing_frame_index == -1)
         {
             playing_timer = 0.0f;
         }
+
+        /// @ replaying control logic here.
         if (continue_stop)
         {
-            playing_timer += Time.deltaTime * boost_rate;
+            if (forward_backward)
+            {
+                playing_timer += Time.deltaTime * boost_rate;
+            }
+            else
+            {
+                playing_timer -= Time.deltaTime * boost_rate;
+            }
+            playing_frame_index = calculate_frame_index(playing_timer, fps);
+            if (forward_backward) 
+            {
+                // now forward played to end
+                if (playing_frame_index > num_frames - 1)
+                {
+                    playing_frame_index = num_frames - 1;
+                    playing_timer = num_frames / fps;
+                    boost_rate = 1;
+                    boost_rate_dropdown.value = 2;
+                    continue_stop = false;
+                }
+            }
+            else
+            {
+                // now backward played to start
+                if (playing_frame_index < 0)
+                {
+                    playing_frame_index = 0;
+                    //update_slider(playing_frame_index);
+                    forward_backward = true;
+                    boost_rate = 1;
+                    boost_rate_dropdown.value = 2;
+                    continue_stop = false;
+                }
+            }
         }
 
+        // Load one frame data for rendering
+        float[] shape = new float[16];
         (float[] pose,float[] trans) = load_one_frame(poses,transls,playing_frame_index);
         trans = _swap_translation_yz_axes_single(trans);
         if(single_shape_paramenters)
@@ -149,36 +195,6 @@ public class PoseStation : MonoBehaviour
             foreach (TcpControlledBody sub in subscribers)
             {
                 sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose,-90),180), _adapt_betas_shape(shape));
-            }
-        }
-
-        /// @ replaying control logic here.
-        if(continue_stop)
-        {
-            //playing_frame_index += boost_rate;
-            playing_frame_index = calculate_frame_index(playing_timer, fps);
-            //update_slider(playing_frame_index);
-        }
-
-        if (forward_backward) // now forward playing
-        {
-            if (playing_frame_index >= num_frames - 1)
-            {
-                playing_frame_index = num_frames-1;
-                //update_slider(playing_frame_index);
-                continue_stop = false;
-            }
-            
-        }
-        else // now backward playing
-        {
-            if (playing_frame_index <= 0)
-            {
-                playing_frame_index = 0;
-                //update_slider(playing_frame_index);
-                forward_backward = true;
-                boost_rate = 1;
-                continue_stop = false;
             }
         }
     }
@@ -606,38 +622,88 @@ public class PoseStation : MonoBehaviour
     public bool get_continue_stop() { return continue_stop; }
     public void Rewind()
     {
-        if(boost_rate > 1)
+        if(boost_rate > 1 && forward_backward == true)
         {
             boost_rate = 1;
             forward_backward = true;
         }
-        else if(boost_rate == 1)
+        else if(boost_rate == 1 && forward_backward == true)
         {
-            boost_rate = -1;
             forward_backward = false;
         }
-        else if (boost_rate >= -8 && boost_rate < 0)
+        else if (boost_rate == 0.25 && forward_backward == false)
         {
-            boost_rate--;
+            boost_rate = 1;
+        }
+        else if (boost_rate == 0.5 && forward_backward == false)
+        {
+            boost_rate = 1;
+        }
+        else if (boost_rate == 1 && forward_backward == false)
+        {
+            boost_rate++;
+        }
+        else if (boost_rate == 1.5 && forward_backward == false)
+        {
+            boost_rate = 2;
+        }
+        else if (boost_rate <= 8 && boost_rate > 1.5 && forward_backward == false)
+        {
+            boost_rate++;
             forward_backward = false;
+        }
+
+        // Update Boost Rate Dropdown
+        if (boost_rate == 1)
+        {
+            boost_rate_dropdown.value = 2;
+        }
+        else
+        {
+            boost_rate_dropdown.value = (int)boost_rate + 2;
         }
     }
     public void FastForward()
     {
-        if(boost_rate < -1)
-        {
-            boost_rate = -1;
-            forward_backward = false;
-        }
-        else if (boost_rate == -1)
+        if(boost_rate > 1 && forward_backward == false)
         {
             boost_rate = 1;
+            forward_backward = false;
+        }
+        else if (boost_rate == 1 && forward_backward == false)
+        {
             forward_backward = true;
         }
-        else if (boost_rate <= 8 && boost_rate > 0)
+        else if (boost_rate == 0.25 && forward_backward == true)
+        {
+            boost_rate = 1;
+        }
+        else if (boost_rate == 0.5 && forward_backward == true)
+        {
+            boost_rate = 1;
+        }
+        else if (boost_rate == 1 && forward_backward == true)
+        {
+            boost_rate++;
+        }
+        else if (boost_rate == 1.5 && forward_backward == true)
+        {
+            boost_rate = 2;
+        }
+        else if (boost_rate <= 8 && boost_rate > 1.5 && forward_backward == true)
         {
             boost_rate++;
             forward_backward = true;
+        }
+
+        // Update Boost Rate Dropdown
+        if (boost_rate == 1)
+        {
+            boost_rate_dropdown.value = 2;
+        }
+        else
+        {
+            boost_rate_dropdown.value = (int)boost_rate + 2;
         }
     }
     private int calculate_frame_index(float timer, float frame_rate)
@@ -652,11 +718,41 @@ public class PoseStation : MonoBehaviour
     {
         continue_stop = last_play_state;
     }
-    public void set_playing_frame_index(int index)
+    public void set_playing_timer(float timer)
     {
-        playing_frame_index = index;
-        playing_timer = index / fps;
+        playing_timer = timer;
+        playing_frame_index = (int)(timer * fps);
     }
+    public void set_boost_rate(float new_boost_rate)
+    {
+        boost_rate = new_boost_rate;
+    }
+    public float get_booste_rate() { return boost_rate; }
+
+    /// @ Functions for File choose
+    public List<string> get_npz_files() {  return npz_files; }
+    public void change_file(int file_index)
+    {
+        if(file_index != playing_file_index)
+        {
+            // update playing_file_index
+            playing_file_index = file_index;
+
+            // Init playing state
+            playing_frame_index = -1;
+            continue_stop = false;
+            forward_backward = true;
+
+            // Init playing data
+            poses = poses_dic[npz_files[playing_file_index]];
+            shapes = shapes_dic[npz_files[playing_file_index]];
+            transls = transls_dic[npz_files[playing_file_index]];
+            fps = fps_dic[npz_files[playing_file_index]];
+            num_frames = num_frames_dic[npz_files[playing_file_index]];
+            m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
+        }
+    }
+
     /// @ Functions for outer use
     public int get_num_frames()
     {
