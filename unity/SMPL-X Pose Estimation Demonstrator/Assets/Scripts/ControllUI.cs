@@ -17,6 +17,14 @@ public class ControllUI : MonoBehaviour
     private Text now_time;
     private Dropdown boost_rate_dropdown;
     private Dropdown file_name_dropdown;
+    private Canvas editor_control_canvas;
+    private Canvas editor_info_canvas;
+    private InputField start_point_input;
+    private InputField end_point_input;
+    private InputField copied_file_input;
+    private Toggle copy_shape_toggle;
+    private float slice_start_time = 0.0f;
+    private float slice_end_time = 0.0f;
 
     private bool on_drag = false;
     private bool last_play_state = false;
@@ -95,6 +103,69 @@ public class ControllUI : MonoBehaviour
             Debug.Log($"in {this.name} FileNameDropdown not Found!");
         }
 
+        // Get Editor Control Canvas
+        editor_control_canvas = GameObject.Find("EditorTable_Control").GetComponent<Canvas>();
+        if (editor_control_canvas != null)
+        {
+            editor_control_canvas.enabled = false;
+        }
+        else
+        {
+            Debug.Log($"in {this.name} EditorTable_Control not Found!");
+        }
+        
+        // Get Start and End Point input.
+        start_point_input = GameObject.Find("StartPoint").GetComponent<InputField>();
+        if (start_point_input != null)
+        {
+            start_point_input.text = "00:00:00";
+        }
+        else
+        {
+            Debug.Log($"in {this.name} StartPoint not Found!");
+        }
+        end_point_input = GameObject.Find("EndPoint").GetComponent<InputField>();
+        if (end_point_input != null)
+        {
+            end_point_input.text = "00:00:00";
+        }
+        else
+        {
+            Debug.Log($"in {this.name} EndPoint not Found!");
+        }
+
+        // Get Editor Info Canvas
+        editor_info_canvas = GameObject.Find("EditorTable_Info").GetComponent<Canvas>();
+        if (editor_info_canvas != null)
+        {
+            editor_info_canvas.enabled = false;
+        }
+        else
+        {
+            Debug.Log($"in {this.name} EditorTable_Info not Found!");
+        }
+
+        // Get Copied Field input.
+        copied_file_input = GameObject.Find("CopiedFile").GetComponent<InputField>();
+        if(copied_file_input != null)
+        {
+            copied_file_input.text = "Copied: ";
+        }
+        else
+        {
+            Debug.Log($"in {this.name} CopiedFile not Found!");
+        }
+
+        // Get Copy Shape Toggle
+        copy_shape_toggle = GameObject.Find("CopyShapeToggle").GetComponent<Toggle>();
+        if (copy_shape_toggle != null)
+        {
+            copy_shape_toggle.isOn = true;
+        }
+        else
+        {
+            Debug.Log($"in {this.name} CopyShapeToggle not Found!");
+        }
     }
     void Update()
     {
@@ -196,6 +267,27 @@ public class ControllUI : MonoBehaviour
 
         return formattedTime;
     }
+    private string FormatTimeShort(float totalSeconds)
+    {
+        int hours = (int)totalSeconds / 3600;
+        int minutes = ((int)totalSeconds % 3600) / 60;
+        float remainingSeconds = totalSeconds % 60;
+
+        string formattedTime = string.Empty;
+
+        if (hours > 0)
+        {
+            formattedTime += $"{hours:D2}:";
+        }
+        if(minutes > 0) 
+        {
+            formattedTime += $"{minutes:D2}";
+        }
+
+        formattedTime += $":{remainingSeconds:00.0}";
+
+        return formattedTime;
+    }
 
     /// @ File Name Dropdown
     public void change_file()
@@ -204,5 +296,122 @@ public class ControllUI : MonoBehaviour
         float total_record_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
         total_time.text = FormatTime(total_record_time);
         progress_slider.maxValue = total_record_time;
+        start_point_input.text = "00:00:00";
+        end_point_input.text = "00:00:00";
+        slice_start_time = 0.0f;
+        slice_end_time = 0.0f;
+    }
+
+    /// @ Editor Table Control
+    public void show_hide_editor_control()
+    {
+        if (editor_control_canvas.enabled == true)
+        {
+            editor_control_canvas.enabled = false;
+            editor_info_canvas.enabled = false;
+        }
+        else
+        {
+            editor_control_canvas.enabled = true;
+            editor_info_canvas.enabled = true;
+        }
+    }
+
+    /// @ Copy and Paste Function
+    public void choose_start_point()
+    {
+        if (progress_slider.value < slice_end_time)
+        {
+            slice_start_time = slice_end_time;
+        }
+        else
+        {
+            slice_start_time = progress_slider.value;
+        }
+        start_point_input.text = FormatTime(slice_start_time);
+    }
+    public void cancel_start_choose()
+    {
+        slice_start_time = 0.0f;
+        start_point_input.text = "00:00:00";
+    }
+    public void choose_end_point()
+    {
+        if (progress_slider.value < slice_start_time)
+        {
+            slice_end_time = slice_start_time;
+        }
+        else
+        {
+            slice_end_time = progress_slider.value;
+        }
+        end_point_input.text = FormatTime(slice_end_time);
+    }
+    public void cancel_end_choose()
+    {
+        slice_end_time = 0.0f;
+        end_point_input.text = "00:00:00";
+    }
+
+    public void copy_slice()
+    {
+        if(slice_end_time < slice_start_time)
+        {
+            throw new Exception("End Point should not be less than Start Point");
+        }
+        else
+        {
+            m_PoseStationScript.copy_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
+            Debug.Log($"filename: {m_PoseStationScript.get_playing_filename()}");
+            string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
+            Debug.Log($"copied_file_text: {copied_file_text}");
+            copied_file_input.text = copied_file_text;
+        }
+    }
+    public void cut_slice()
+    {
+        if (slice_end_time < slice_start_time)
+        {
+            throw new Exception("End Point should not be less than Start Point");
+        }
+        else
+        {
+            m_PoseStationScript.cut_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
+
+            string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
+            float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+            progress_slider.maxValue = new_total_time;
+            total_time.text = FormatTime(new_total_time);
+            copied_file_input.text = copied_file_text;
+        }
+    }
+    public void paste_slice()
+    {
+        int insert_index = (int)(progress_slider.value * m_PoseStationScript.get_fps());
+
+        m_PoseStationScript.paste_slice(insert_index, true);
+
+        float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+        progress_slider.maxValue = new_total_time;
+        total_time.text = FormatTime(new_total_time);
+    }
+    public void replace_slice()
+    {
+        if (slice_end_time < slice_start_time)
+        {
+            throw new Exception("End Point should not be less than Start Point");
+        }
+        else
+        {
+            int replace_start_index = (int)(slice_start_time * m_PoseStationScript.get_fps());
+            int replace_end_index = (int)(slice_end_time * m_PoseStationScript.get_fps());
+
+            m_PoseStationScript.replace_slice(replace_start_index, replace_end_index, true);
+
+            float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+            progress_slider.maxValue = new_total_time;
+            total_time.text = FormatTime(new_total_time);
+        }
+
     }
 }

@@ -25,9 +25,13 @@ public class PoseStation : MonoBehaviour
     private NDArray poses = np.empty(new int[] {0});
     private NDArray shapes = np.empty(new int[] {0});
     private NDArray transls = np.empty(new int[] {0});
-    // Hint record_time = num_frames / fps;
     private float fps = -1;
     private int num_frames = -1;
+    private NDArray copied_poses = np.empty(new int[] {0});
+    private NDArray copied_shapes = np.empty(new int[] {0});
+    private NDArray copied_transls = np.empty(new int[] {0});
+    private float copied_fps = -1;
+    private int copied_num_frames = -1;
     private Vector3 m_initialBodyPositionsData;    
     private Dictionary<string, NDArray> poses_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, NDArray> shapes_dic = new Dictionary<string, NDArray>();
@@ -74,10 +78,7 @@ public class PoseStation : MonoBehaviour
                             = _load_npz_attribute(npz_files_paths[i], "poses", "betas", "trans", "mocap_frame_rate");
                         num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
                         float[] trans = get_frame(0, transls_dic[npz_files[i]]);
-                        lock (locker_initialBodyPositionData)
-                        {
-                            m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
-                        }
+                        m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
                     }
                 }
                 poses = poses_dic[npz_files[playing_file_index]];
@@ -194,7 +195,8 @@ public class PoseStation : MonoBehaviour
             Vector3 translationDifferenceData = new Vector3(trans[0],trans[1],trans[2]) - initBodyPosition;
             foreach (TcpControlledBody sub in subscribers)
             {
-                sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose,-90),180), _adapt_betas_shape(shape));
+                //sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose, -90), 180), _adapt_betas_shape(shape));
+                sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
             }
         }
     }
@@ -767,12 +769,178 @@ public class PoseStation : MonoBehaviour
     {
         progress_slider.value = playing_frame_index / fps;
     }
-
     public void update_play_frame(int new_frame_index)
     {
         playing_frame_index = new_frame_index;
         playing_timer = new_frame_index / fps;
     }
+    public string get_playing_filename()
+    {
+        return npz_files[playing_file_index];
+    }
 
+    /// @ Editor Functions
+    public void copy_slice(float start_time, float end_time, bool copy_shape)
+    {
+        // 
+        copied_fps = -1;
+        copied_num_frames = -1;
+        copied_poses = np.empty(new int[] { 0 });
+        copied_shapes = np.empty(new int[] { 0 });
+        copied_transls = np.empty(new int[] { 0 });
 
-}
+        copied_fps = fps;
+        int start_index = calculate_frame_index(start_time, fps);
+        int end_index = calculate_frame_index(end_time, fps);
+        copied_num_frames = end_index - start_index + 1;
+        if (copy_shape) { copied_shapes = shapes; }
+        copied_poses = poses[$"{start_index}:{end_index+1},:"];
+        copied_transls = transls[$"{start_index}:{end_index+1},:"];
+    }
+    public void cut_slice(float start_time, float end_time, bool copy_shape)
+    {
+        // 
+        copied_fps = -1;
+        copied_num_frames = -1;
+        copied_poses = np.empty(new int[] { 0 });
+        copied_shapes = np.empty(new int[] { 0 });
+        copied_transls = np.empty(new int[] { 0 });
+
+        copied_fps = fps;
+        int start_index = calculate_frame_index(start_time, fps);
+        int end_index = calculate_frame_index(end_time, fps);
+        copied_num_frames = end_index - start_index + 1;
+        if (copy_shape) { copied_shapes = shapes; }
+        copied_poses = poses[$"{start_index}:{end_index + 1},:"];
+        copied_transls = transls[$"{start_index}:{end_index + 1},:"];
+
+        // Apply edit to playing cache
+        num_frames -= copied_num_frames;
+        poses = DeleteRange(poses, start_index, end_index);
+        transls = DeleteRange(transls, start_index, end_index);
+
+        // Apply edit to laod cache
+        poses_dic[npz_files[playing_file_index]] = poses;
+        transls_dic[npz_files[playing_file_index]] = transls;
+        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+    }
+    public void replace_slice(int replace_start_index, int replace_end_index, bool copy_shape)
+    {
+        Debug.Log($"old shape: {poses.Shape}");
+        Debug.Log($"replace {replace_start_index}-{replace_end_index}");
+        Debug.Log($"copied shape: {copied_poses.Shape}");
+        Debug.Log($"new shape: {DeleteRange(poses, replace_start_index, replace_end_index).Shape}");
+
+        if (!copy_shape)
+        {
+            copied_shapes = shapes;
+        }
+
+        num_frames = num_frames - (replace_end_index - replace_start_index + 1) + copied_num_frames;
+        poses = Insert2DArray(DeleteRange(poses, replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
+        transls = Insert2DArray(DeleteRange(transls, replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+
+        // Apply edit to laod cache
+        poses_dic[npz_files[playing_file_index]] = poses;
+        transls_dic[npz_files[playing_file_index]] = transls;
+        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+    }
+    public void paste_slice(int insert_index, bool copy_shape)
+    {
+        if (!copy_shape)
+        {
+            copied_shapes = shapes;
+        }
+
+        num_frames += copied_num_frames;
+        poses = Insert2DArray(poses, copied_poses, insert_index, false);
+        transls = Insert2DArray(transls, copied_transls, insert_index, true);
+
+        // Apply edit to laod cache
+        poses_dic[npz_files[playing_file_index]] = poses;
+        transls_dic[npz_files[playing_file_index]] = transls;
+        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+    }
+    public static NDArray Insert2DArray(NDArray original, NDArray insert, int insertIndex, bool align)
+    {
+        var originalShape = original.shape;
+        var insertShape = insert.shape;
+
+        if (originalShape.Length != 2 || insertShape.Length != 2)
+        {
+            throw new ArgumentException("Both original and insert NDArray must be 2-dimensional.");
+        }
+
+        if (originalShape[1] != insertShape[1])
+        {
+            throw new ArgumentException("Both original and insert NDArray must have the same number of columns.");
+        }
+
+        if(align)
+        {
+            var insert_trans_difference = original[insertIndex] - insert[0];
+            for (int i = 0; i < insert.shape[0]; i++)
+            {
+                insert[i] += insert_trans_difference;
+            }
+        }
+
+        var resultShape = new Shape(originalShape[0] + insertShape[0], originalShape[1]);
+        var result = np.zeros(resultShape);
+
+        result[$":{insertIndex + 1}, :"] = original[$"0:{insertIndex + 1}, :"];
+
+        result[$"{insertIndex + 1}:{insertIndex + insertShape[0] + 1}, :"] = insert;
+
+        result[$"{insertIndex + insertShape[0] + 1}:, :"] = original[$"{insertIndex + 1}:, :"];
+
+        return result;
+    }
+    public static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
+    {
+        // Get the original shape
+        var originalShape = array.shape;
+
+        // check the index validation
+        if (start < 0 || end >= originalShape[axis] || start > end)
+        {
+            throw new ArgumentException("Invalid start or end index.");
+        }
+
+        // Compute new shape
+        var newShape = new int[originalShape.Length];
+        Array.Copy(originalShape, newShape, originalShape.Length);
+        newShape[axis] -= (end - start + 1);
+
+        // create new NDArray
+        var result = np.zeros(newShape);
+
+        // construct the slice
+        var beforeSlice = new Slice[originalShape.Length];
+        var afterSlice = new Slice[originalShape.Length];
+        var resultBeforeSlice = new Slice[originalShape.Length];
+        var resultAfterSlice = new Slice[originalShape.Length];
+
+        for (int i = 0; i < originalShape.Length; i++)
+        {
+            beforeSlice[i] = new Slice();
+            afterSlice[i] = new Slice();
+            resultBeforeSlice[i] = new Slice();
+            resultAfterSlice[i] = new Slice();
+        }
+
+        beforeSlice[axis] = new Slice(stop: start);
+        afterSlice[axis] = new Slice(start: end + 1);
+        resultBeforeSlice[axis] = new Slice(stop: start);
+        resultAfterSlice[axis] = new Slice(start: start);
+
+        // copy part before deleted part to new NDArray
+        result[resultBeforeSlice] = array[beforeSlice];
+
+        // copy part after deleted part to new NDArray
+        result[resultAfterSlice] = array[afterSlice];
+
+        return result;
+    }
+
+}   
