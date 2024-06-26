@@ -20,31 +20,42 @@ public class PoseStation : MonoBehaviour
     private List<string> npz_files = new List<string>();
     private readonly System.Object locker_initialBodyPositionData = new System.Object();
 
-    // Flag for wheather loaded the target npz file
+    
     public bool load_npz_success = false;
+    /// @ Playing buffer
     private NDArray poses = np.empty(new int[] {0});
     private NDArray shapes = np.empty(new int[] {0});
     private NDArray transls = np.empty(new int[] {0});
     private float fps = -1;
     private int num_frames = -1;
+    private Vector3 m_initialBodyPositionsData;
+    //
+    private List<NDArray> poses_list;
+    private List<NDArray> shapes_list;
+    private List<NDArray> transls_list;
+    private List<Vector3> m_initialBodyPositionsData_list;
+    private List<int> num_frames_list;
+
+    /// @ Copy buffer
     private NDArray copied_poses = np.empty(new int[] {0});
     private NDArray copied_shapes = np.empty(new int[] {0});
     private NDArray copied_transls = np.empty(new int[] {0});
     private float copied_fps = -1;
     private int copied_num_frames = -1;
-    private Vector3 m_initialBodyPositionsData;    
+    /// @ Load .npz file buffer
     private Dictionary<string, NDArray> poses_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, NDArray> shapes_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, NDArray> transls_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, float> fps_dic = new Dictionary<string, float>();
     private Dictionary<string, int> num_frames_dic = new Dictionary<string, int>();
     private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
-    
+    /// @ Playing Infos
     private int playing_frame_index = -1;
-    private int n_shape_components = 10;
     private float playing_timer = 0.0f;
-
     private int playing_file_index = 0;
+
+    /// @ Model Settings
+    private int n_shape_components = 10;
 
     /// @ Player controll parameters
     private float boost_rate = 1;
@@ -74,21 +85,54 @@ public class PoseStation : MonoBehaviour
                     if (File.Exists(npz_files_paths[i]))
                     {
                         npz_files.Add(Path.GetFileNameWithoutExtension(npz_files_paths[i]));
+
                         (poses_dic[npz_files[i]], shapes_dic[npz_files[i]], transls_dic[npz_files[i]], fps_dic[npz_files[i]])
                             = _load_npz_attribute(npz_files_paths[i], "poses", "betas", "trans", "mocap_frame_rate");
+
                         num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
                         float[] trans = get_frame(0, transls_dic[npz_files[i]]);
                         m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
                     }
                 }
-                poses = poses_dic[npz_files[playing_file_index]];
+
                 shapes = shapes_dic[npz_files[playing_file_index]];
+
+                poses = poses_dic[npz_files[playing_file_index]];
                 transls = transls_dic[npz_files[playing_file_index]];
                 fps = fps_dic[npz_files[playing_file_index]];
                 num_frames = num_frames_dic[npz_files[playing_file_index]];
                 m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
-                // Application.targetFrameRate = (int)fps;
-                Debug.Log($"total time: {num_frames/fps}");
+                
+                /*
+                if (shapes.ndim == 1)
+                {
+                    single_shape_paramenters = true;
+                }
+                else
+                {
+                    single_shape_paramenters = false;
+                }
+                if (single_shape_paramenters)
+                {
+                    shapes_list.Add(shapes_dic[npz_files[playing_file_index]]);
+                    poses_list.Add(poses_dic[npz_files[playing_file_index]]);
+                    transls_list.Add(transls_dic[npz_files[playing_file_index]]);
+                    num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
+                    m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][0], transls_dic[npz_files[playing_file_index]][1], transls_dic[npz_files[playing_file_index]][2]));
+
+                }
+                else
+                {
+                    for (int i=0;i<shapes.shape[0];i++)
+                    {
+                        shapes_list.Add(shapes_dic[npz_files[playing_file_index]][i]);
+                        poses_list.Add(poses_dic[npz_files[playing_file_index]][i]);
+                        transls_list.Add(transls_dic[npz_files[playing_file_index]][i]);
+                        num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
+                        m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][i][0], transls_dic[npz_files[playing_file_index]][i][1], transls_dic[npz_files[playing_file_index]][i][2]));
+                    }
+                }
+                */
             }
             else
             {
@@ -752,6 +796,37 @@ public class PoseStation : MonoBehaviour
             fps = fps_dic[npz_files[playing_file_index]];
             num_frames = num_frames_dic[npz_files[playing_file_index]];
             m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
+            
+            /*
+            if (shapes.ndim == 1)
+            {
+                single_shape_paramenters = true;
+            }
+            else
+            {
+                single_shape_paramenters = false;
+            }
+            if (single_shape_paramenters)
+            {
+                shapes_list.Add(shapes_dic[npz_files[playing_file_index]]);
+                poses_list.Add(poses_dic[npz_files[playing_file_index]]);
+                transls_list.Add(transls_dic[npz_files[playing_file_index]]);
+                num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
+                m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][0], transls_dic[npz_files[playing_file_index]][1], transls_dic[npz_files[playing_file_index]][2]));
+
+            }
+            else
+            {
+                for (int i = 0; i < shapes.shape[0]; i++)
+                {
+                    shapes_list.Add(shapes_dic[npz_files[playing_file_index]][i]);
+                    poses_list.Add(poses_dic[npz_files[playing_file_index]][i]);
+                    transls_list.Add(transls_dic[npz_files[playing_file_index]][i]);
+                    num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
+                    m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][i][0], transls_dic[npz_files[playing_file_index]][i][1], transls_dic[npz_files[playing_file_index]][i][2]));
+                }
+            }
+            */
         }
     }
 
@@ -878,21 +953,33 @@ public class PoseStation : MonoBehaviour
 
         if(align)
         {
-            var insert_trans_difference = original[insertIndex] - insert[0];
+            var insert_difference = original[insertIndex] - insert[0];
             for (int i = 0; i < insert.shape[0]; i++)
             {
-                insert[i] += insert_trans_difference;
+                insert[i] += insert_difference;
             }
         }
 
         var resultShape = new Shape(originalShape[0] + insertShape[0], originalShape[1]);
         var result = np.zeros(resultShape);
 
+        // Copy part before insert point into result
         result[$":{insertIndex + 1}, :"] = original[$"0:{insertIndex + 1}, :"];
 
+        // Copy insert part into result 
         result[$"{insertIndex + 1}:{insertIndex + insertShape[0] + 1}, :"] = insert;
 
-        result[$"{insertIndex + insertShape[0] + 1}:, :"] = original[$"{insertIndex + 1}:, :"];
+        var last_part = original[$"{insertIndex + 1}:, :"];
+        if (align)
+        {
+            int insert_length = insert.shape[0];
+            var insert_difference = insert[insert_length - 1] - last_part[0];
+            for (int i = 0; i < last_part.shape[0]; i++)
+            {
+                last_part[i] += insert_difference;
+            }
+        }
+        result[$"{insertIndex + insertShape[0] + 1}:, :"] = last_part;
 
         return result;
     }

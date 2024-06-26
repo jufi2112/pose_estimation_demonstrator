@@ -3,69 +3,104 @@ using System.Collections.Generic;
 using System.IO;
 using System;
 using System.Linq;
+using System.Text;
 
 using UnityEngine;
 using NumSharp;
 using NumSharp.Utilities;
+using Ionic.Zip;
+public static class NpySaver
+{
+    public static void SaveFloatToNpy(float value, string filePath)
+    {
+        // Prepare .npy header and data
+        var header = CreateNpyHeader(value);
+        var data = BitConverter.GetBytes(value);
+        Debug.Log($"byte data: {string.Join("",data)}");
+        // Write magic string, version, header length, header, and data to .npy file
+        using (var writer = new BinaryWriter(File.Open(filePath, FileMode.Create)))
+        {
+            WriteMagicString(writer);
+            WriteVersion(writer);
+            WriteHeaderLength(writer, header);
+            WriteHeader(writer, header);
+            WriteData(writer, data);
+        }
+    }
+
+    private static void WriteMagicString(BinaryWriter writer)
+    {
+        // Write magic string "\x93NUMPY"
+        char[] magic = {'N', 'U', 'M', 'P', 'Y'};
+        writer.Write((byte)147);
+        writer.Write(magic);
+    }
+
+    private static void WriteVersion(BinaryWriter writer)
+    {
+        // Write version (major=1, minor=0)
+        writer.Write((byte)1);  // major version
+        writer.Write((byte)0);  // minor version
+    }
+
+    private static void WriteHeaderLength(BinaryWriter writer, string header)
+    {
+        // Write header length (ushort)
+        writer.Write((ushort)header.Length);
+    }
+
+    private static void WriteHeader(BinaryWriter writer, string header)
+    {
+        // Write header as ASCII bytes
+        //writer.Write(Encoding.ASCII.GetBytes(header));
+        for (int i = 0; i < header.Length; i++)
+            writer.Write((byte)header[i]);
+    }
+
+    private static void WriteData(BinaryWriter writer, byte[] data)
+    {
+        // Write data bytes
+        writer.Write(data);
+    }
+
+    private static string CreateNpyHeader(float value)
+    {
+        // Generate .npy header for a single float value
+
+        var header = "{'descr': '<f8', 'fortran_order': False, 'shape': (), }";
+
+        int headerSize = header.Length + 10;
+        int pad = 16 - (headerSize % 16);
+        
+        return header.PadRight(header.Length+pad, ' ') + "\n";
+    }
+}
+
 
 public class test : MonoBehaviour
 {
     string path = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\army_poses_stageii\mocap_frame_rate.npy";
-    string path2 = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\army_poses_stageii.npz";
-    string path3 = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\betas.npy";
-    string path4 = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\poses.npy";
+    string path_npz = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\army_poses_stageii.npz";
+    string path_betas = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\betas.npy";
+    string path_poses = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\poses.npy";
+    string save = @"D:\Dataset\";
     // Start is called before the first frame update
     void Start()
     {
-        //var data = np.Load<float[]>(path);
-        var stream = new FileStream(path, FileMode.Open);
-        /*var reader = new BinaryReader(stream, System.Text.Encoding.ASCII);*/
-
-        using (var reader = new BinaryReader(stream, System.Text.Encoding.ASCII
-            ))
-        {
-            int bytes;
-            Type type;
-            int[] shape;
-            
-            if (!parseReader(reader, out bytes, out type, out shape))
-                throw new FormatException();
-            Shape shp = new Shape(1);
-            Debug.Log("shp: " + shp);
-            Debug.Log("shape l: " + shape.Length); 
-
-            var buffer = new byte[bytes * 1];
-            Array array;
-            if(shape.Length == 0)
-            {
-                array = Array.CreateInstance(type, 1);
-            }
-            else
-            {
-                 array = Arrays.Create(type, shape.Aggregate((dims, dim) => dims * dim));
-            }
-
-            var result = new NDArray(readValueMatrix(reader, array, bytes, type, shape));
-            Debug.Log("result: " + result);
-            Debug.Log("result shp: " + result.Shape[0]);
-
-            var res = get_fps(result);
-            Debug.Log("fps: " + res);
-
-
-            /*var data = get_frame(0, result);
-            Debug.Log("data: " + string.Join(",", data));*/
-
-        }
-        float get_fps(NDArray datas)
-        {
-            float fps;
-
-            fps = np.asscalar<float>(datas);
-
-            return fps;
-        }
-
+        NDArray shapes = np.load(path_betas);
+        NDArray poses = np.load(path_poses);
+        Debug.Log($"poses.Shape{poses.shape[0]}");
+        float fps_single = 120;
+        NDArray fps_arr = np.asscalar<float>(fps_single);
+        np.save(save + "pose_0", poses[0]);
+        np.save(save + "shapes", shapes);
+        //np.save(save + "mocap_fps", fps_arr);
+        NpySaver.SaveFloatToNpy(fps_single, save + "mocap_fps.npy");
+        var zip = new ZipFile();
+        zip.AddFile(save + "pose_0.npy", "");
+        zip.AddFile(save + "shapes.npy", "");
+        zip.AddFile(save + "mocap_frame_rate.npy", "");
+        zip.Save(save + "new.npz");
 
     }
     private static bool parseReader(BinaryReader reader, out int bytes, out Type t, out int[] shape)
@@ -204,9 +239,5 @@ public class test : MonoBehaviour
     }
 
 
-    // Update is called once per frame
-    void Update()
-    {
-        
-    }
 }
+
