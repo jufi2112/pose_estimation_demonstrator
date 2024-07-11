@@ -1,16 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
+using System;
 using System.IO;
 using System.Linq;
-using System;
+using SN = System.Numerics;
 using Ionic.Zip;
 using NumSharp;
 using NumSharp.Utilities;
 
 public class PoseStation : MonoBehaviour
 {
-    private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
+    //private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
     private string dataset_path_relative = "./Dataset";
     private bool single_shape_paramenters = true;
 
@@ -19,23 +20,9 @@ public class PoseStation : MonoBehaviour
     
     private List<string> npz_files = new List<string>();
     private readonly System.Object locker_initialBodyPositionData = new System.Object();
-
-    
+        
     public bool load_npz_success = false;
-    /// @ Playing buffer
-    private NDArray poses = np.empty(new int[] {0});
-    private NDArray shapes = np.empty(new int[] {0});
-    private NDArray transls = np.empty(new int[] {0});
-    private float fps = -1;
-    private int num_frames = -1;
-    private Vector3 m_initialBodyPositionsData;
-    //
-    private List<NDArray> poses_list;
-    private List<NDArray> shapes_list;
-    private List<NDArray> transls_list;
-    private List<Vector3> m_initialBodyPositionsData_list;
-    private List<int> num_frames_list;
-
+    
     /// @ Copy buffer
     private NDArray copied_poses = np.empty(new int[] {0});
     private NDArray copied_shapes = np.empty(new int[] {0});
@@ -47,12 +34,13 @@ public class PoseStation : MonoBehaviour
     private Dictionary<string, NDArray> shapes_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, NDArray> transls_dic = new Dictionary<string, NDArray>();
     private Dictionary<string, float> fps_dic = new Dictionary<string, float>();
-    private Dictionary<string, int> num_frames_dic = new Dictionary<string, int>();
-    private Dictionary<string, Vector3> m_initialBodyPositionsData_dic = new Dictionary<string, Vector3>();
+    private Dictionary<string, int[]> num_frames_dic = new Dictionary<string, int[]>();
+    private Dictionary<string, Vector3[]> initialBodyPosition_dic = new Dictionary<string, Vector3[]>();
     /// @ Playing Infos
     private int playing_frame_index = -1;
     private float playing_timer = 0.0f;
     private int playing_file_index = 0;
+    private int playing_body_id = 0;
 
     /// @ Model Settings
     private int n_shape_components = 10;
@@ -74,37 +62,40 @@ public class PoseStation : MonoBehaviour
         if(Directory.Exists(dataset_path))
         {
             string[] npz_files_paths = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly).Where(file => !file.EndsWith(".meta")).ToArray();
-            foreach(var file in npz_files_paths)
-            {
-                Debug.Log("------" + file);
-            }
+
             if (npz_files_paths.Length !=0)
             {
                 for (int i = 0; i < npz_files_paths.Length; i++)
                 {
                     if (File.Exists(npz_files_paths[i]))
                     {
-                        npz_files.Add(Path.GetFileNameWithoutExtension(npz_files_paths[i]));
+                        npz_files.Add(Path.GetFileNameWithoutExtension(npz_files_paths[i])); // Add into file list
 
+                        // Load poses.npy betas.npy and transls.npy from xxx.npz  with fileindex i.
                         (poses_dic[npz_files[i]], shapes_dic[npz_files[i]], transls_dic[npz_files[i]], fps_dic[npz_files[i]])
-                            = _load_npz_attribute(npz_files_paths[i], "poses", "betas", "trans", "mocap_frame_rate");
+                            = _load_npz_attribute(npz_files_paths[i], "poses", "betas", "trans", "mocap_frame_rate"); // load .npy from .npz into NDArray.
 
-                        num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
-                        float[] trans = get_frame(0, transls_dic[npz_files[i]]);
-                        m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
+                        if (shapes_dic[npz_files[i]].ndim == 1)
+                        {
+                            initialBodyPosition_dic[npz_files[i]] = compute_initial_trans(transls_dic[npz_files[i]], true);
+                            num_frames_dic[npz_files[i]] = new int[] { poses_dic[npz_files[i]].shape[0] };
+                        }
+                        else
+                        {
+                            for (int j=0; j<shapes_dic[npz_files[i]].shape[0];j++)
+                            {
+                                initialBodyPosition_dic[npz_files[i]] = compute_initial_trans(transls_dic[npz_files[i]], false);
+                                num_frames_dic[npz_files[i]][j] = poses_dic[npz_files[i]][j].shape[0];
+                            }
+                        }
+                        //num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
+                        //float[] trans = get_frame(0, transls_dic[npz_files[i]]);
+                        //m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
                     }
                 }
 
-                shapes = shapes_dic[npz_files[playing_file_index]];
-
-                poses = poses_dic[npz_files[playing_file_index]];
-                transls = transls_dic[npz_files[playing_file_index]];
-                fps = fps_dic[npz_files[playing_file_index]];
-                num_frames = num_frames_dic[npz_files[playing_file_index]];
-                m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
-                
-                /*
-                if (shapes.ndim == 1)
+                //shapes = shapes_dic[npz_files[playing_file_index]];
+                if (shapes_dic[npz_files[playing_file_index]].ndim == 1)
                 {
                     single_shape_paramenters = true;
                 }
@@ -112,27 +103,17 @@ public class PoseStation : MonoBehaviour
                 {
                     single_shape_paramenters = false;
                 }
-                if (single_shape_paramenters)
+                //poses = poses_dic[npz_files[playing_file_index]];
+                //transls = transls_dic[npz_files[playing_file_index]];
+                //fps = fps_dic[npz_files[playing_file_index]];
+                //num_frames = compute_num_frames(poses, single_shape_paramenters);
+                //m_initialBodyPositionsData = compute_initial_trans(transls, single_shape_paramenters); 
+                foreach(var file in npz_files)
                 {
-                    shapes_list.Add(shapes_dic[npz_files[playing_file_index]]);
-                    poses_list.Add(poses_dic[npz_files[playing_file_index]]);
-                    transls_list.Add(transls_dic[npz_files[playing_file_index]]);
-                    num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
-                    m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][0], transls_dic[npz_files[playing_file_index]][1], transls_dic[npz_files[playing_file_index]][2]));
+                    var orientation = poses_dic[file][0][$":{3}"];
+                    Debug.Log($"{file}: {orientation}");
+                }
 
-                }
-                else
-                {
-                    for (int i=0;i<shapes.shape[0];i++)
-                    {
-                        shapes_list.Add(shapes_dic[npz_files[playing_file_index]][i]);
-                        poses_list.Add(poses_dic[npz_files[playing_file_index]][i]);
-                        transls_list.Add(transls_dic[npz_files[playing_file_index]][i]);
-                        num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
-                        m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][i][0], transls_dic[npz_files[playing_file_index]][i][1], transls_dic[npz_files[playing_file_index]][i][2]));
-                    }
-                }
-                */
             }
             else
             {
@@ -166,12 +147,7 @@ public class PoseStation : MonoBehaviour
         shapes_dic.Clear();
         transls_dic.Clear();
         fps_dic.Clear();
-        num_frames_dic.Clear();
-        m_initialBodyPositionsData_dic.Clear();
         m_registeredBodies.Clear();
-        poses = null;
-        shapes = null;
-        transls = null;
 
     }
     void Update()
@@ -192,14 +168,14 @@ public class PoseStation : MonoBehaviour
             {
                 playing_timer -= Time.deltaTime * boost_rate;
             }
-            playing_frame_index = calculate_frame_index(playing_timer, fps);
+            playing_frame_index = calculate_frame_index(playing_timer, fps_dic[npz_files[playing_file_index]]);
             if (forward_backward) 
             {
                 // now forward played to end
-                if (playing_frame_index > num_frames - 1)
+                if (playing_frame_index > num_frames_dic[npz_files[playing_file_index]][playing_body_id] - 1)
                 {
-                    playing_frame_index = num_frames - 1;
-                    playing_timer = num_frames / fps;
+                    playing_frame_index = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - 1;
+                    playing_timer = num_frames_dic[npz_files[playing_file_index]][playing_body_id] / fps_dic[npz_files[playing_file_index]];
                     boost_rate = 1;
                     boost_rate_dropdown.value = 2;
                     continue_stop = false;
@@ -219,30 +195,74 @@ public class PoseStation : MonoBehaviour
                 }
             }
         }
+        
+        if (single_shape_paramenters)
+        {
+            // Load one frame data for rendering
+            float[] shape = new float[16];
+            //(float[] pose, float[] trans) = load_one_frame(poses, transls, playing_frame_index);
+            (float[] pose, float[] trans) = load_one_frame(poses_dic[npz_files[playing_file_index]], transls_dic[npz_files[playing_file_index]], playing_frame_index);
 
-        // Load one frame data for rendering
-        float[] shape = new float[16];
-        (float[] pose,float[] trans) = load_one_frame(poses,transls,playing_frame_index);
-        trans = _swap_translation_yz_axes_single(trans);
-        if(single_shape_paramenters)
-        {
-            shape = get_shape_single(shapes);
-        }
-        List<TcpControlledBody> subscribers;
-        if(m_registeredBodies.TryGetValue(1, out subscribers))
-        {
-            Vector3 initBodyPosition;
-            lock(locker_initialBodyPositionData)
+            trans = _swap_translation_yz_axes_single(trans);
+            if (single_shape_paramenters)
             {
-                initBodyPosition = m_initialBodyPositionsData;
+                shape = get_shape_single(shapes_dic[npz_files[playing_file_index]]);
             }
-            Vector3 translationDifferenceData = new Vector3(trans[0],trans[1],trans[2]) - initBodyPosition;
-            foreach (TcpControlledBody sub in subscribers)
+            List<TcpControlledBody> subscribers;
+            if (m_registeredBodies.TryGetValue(1, out subscribers))
             {
-                //sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose, -90), 180), _adapt_betas_shape(shape));
-                sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
+                Vector3 initBodyPosition;
+                lock (locker_initialBodyPositionData)
+                {
+                    initBodyPosition = initialBodyPosition_dic[npz_files[playing_file_index]][playing_body_id];
+                    //initBodyPosition = m_initialBodyPositionsData[0];
+                }
+                //trans = _add_x_angle_offset_to_pose(trans, -90);
+                Vector3 translationDifferenceData = new Vector3(trans[0], trans[1], trans[2]) - initBodyPosition;
+                foreach (TcpControlledBody sub in subscribers)
+                {
+                    if(continue_stop)
+                    {
+                        Debug.Log($"pose pelvis - {playing_frame_index} : [{pose[0]}, {pose[1]}, {pose[2]}");
+                    }
+                    //sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose, -90), 180), _adapt_betas_shape(shape));
+                    //sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
+
+                    sub.SetParameters(translationDifferenceData, pose, _adapt_betas_shape(shape));
+                }
             }
         }
+        else
+        {
+            for (int i=0;i< shapes_dic[npz_files[playing_file_index]].shape[0];i++)
+            {
+                // Load one frame data for rendering
+                float[] shape = new float[16];
+                //(float[] pose, float[] trans) = load_one_frame(poses[i], transls[i], playing_frame_index);
+                (float[] pose, float[] trans) = load_one_frame(poses_dic[npz_files[playing_file_index]], transls_dic[npz_files[playing_file_index]], playing_frame_index);
+
+                trans = _swap_translation_yz_axes_single(trans);
+                shape = get_shape_single(shapes_dic[npz_files[playing_file_index]][i]);
+               
+                List<TcpControlledBody> subscribers;
+                if (m_registeredBodies.TryGetValue(i+1, out subscribers))
+                {
+                    Vector3 initBodyPosition;
+                    lock (locker_initialBodyPositionData)
+                    {
+                        initBodyPosition = initialBodyPosition_dic[npz_files[playing_file_index]][playing_body_id];
+                        //initBodyPosition = m_initialBodyPositionsData[i];
+                    }
+                    Vector3 translationDifferenceData = new Vector3(trans[0], trans[1], trans[2]) - initBodyPosition;
+                    foreach (TcpControlledBody sub in subscribers)
+                    {
+                        //sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose, -90), 180), _adapt_betas_shape(shape));
+                        sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
+                    }
+                }
+            }
+
+        }    
     }
 
     /// @ Load body pose data 
@@ -403,7 +423,44 @@ public class PoseStation : MonoBehaviour
 
         return littleEndian;
     }
+    
+    // Compute num_frames
+    private static int[] compute_num_frames(NDArray poses, bool single_shape_parameters)
+    {
+        List<int> frames = new List<int>();
+       if (single_shape_parameters) // Single body
+        {
+            frames.Add(poses.shape[0]);
+        }
+       else
+        {
+            for (int i=0; i<poses.shape[0];i++)
+            {
+                frames.Add(poses[i].shape[0]);
+            }
+        }
 
+        return frames.ToArray();
+    }
+    private static Vector3[] compute_initial_trans(NDArray transls, bool single_shape_parameters)
+    {
+        List<Vector3> init_trans = new List<Vector3>();
+        if (single_shape_parameters)
+        {
+            Vector3 _trans = new Vector3(np.asscalar<float>(transls[0, 0]), np.asscalar<float>(transls[0, 2]), np.asscalar<float>(transls[0, 1]));
+            init_trans.Add(_trans);
+        }
+        else
+        {
+            for (int i=0; i<transls.shape[0];i++)
+            {
+                Vector3 _trans = new Vector3(np.asscalar<float>(transls[i][0, 0]), np.asscalar<float>(transls[i][0, 2]), np.asscalar<float>(transls[i][0, 1]));
+                init_trans.Add(_trans);
+            }
+        }
+
+        return init_trans.ToArray();
+    }
     // Load the npz attributes.
     private (NDArray, NDArray, NDArray, float) _load_npz_attribute(string npz_file, 
         string pose_attribute, string shape_attribute, 
@@ -587,6 +644,7 @@ public class PoseStation : MonoBehaviour
 
         return pose;
     }
+ 
     // turn rotation vector into a quaternion.
     private static Quaternion FromRotationVector(Vector3 rotationVector)
     {
@@ -767,7 +825,7 @@ public class PoseStation : MonoBehaviour
     public void set_playing_timer(float timer)
     {
         playing_timer = timer;
-        playing_frame_index = (int)(timer * fps);
+        playing_frame_index = (int)(timer * fps_dic[npz_files[playing_file_index]]);
     }
     public void set_boost_rate(float new_boost_rate)
     {
@@ -775,6 +833,9 @@ public class PoseStation : MonoBehaviour
     }
     public float get_booste_rate() { return boost_rate; }
 
+    public int get_num_body() { return single_shape_paramenters ? 1 : shapes_dic[npz_files[playing_file_index]].shape[0]; }
+    public int get_playing_body_id() { return playing_body_id; }
+    public void set_playing_body_id(int new_body_id) { playing_body_id = new_body_id; }
     /// @ Functions for File choose
     public List<string> get_npz_files() {  return npz_files; }
     public void change_file(int file_index)
@@ -788,17 +849,11 @@ public class PoseStation : MonoBehaviour
             playing_frame_index = -1;
             continue_stop = false;
             forward_backward = true;
+            playing_body_id = 0;
 
             // Init playing data
-            poses = poses_dic[npz_files[playing_file_index]];
-            shapes = shapes_dic[npz_files[playing_file_index]];
-            transls = transls_dic[npz_files[playing_file_index]];
-            fps = fps_dic[npz_files[playing_file_index]];
-            num_frames = num_frames_dic[npz_files[playing_file_index]];
-            m_initialBodyPositionsData = m_initialBodyPositionsData_dic[npz_files[playing_file_index]];
-            
-            /*
-            if (shapes.ndim == 1)
+            //shapes = shapes_dic[npz_files[playing_file_index]];
+            if (shapes_dic[npz_files[playing_file_index]].ndim == 1)
             {
                 single_shape_paramenters = true;
             }
@@ -806,48 +861,32 @@ public class PoseStation : MonoBehaviour
             {
                 single_shape_paramenters = false;
             }
-            if (single_shape_paramenters)
-            {
-                shapes_list.Add(shapes_dic[npz_files[playing_file_index]]);
-                poses_list.Add(poses_dic[npz_files[playing_file_index]]);
-                transls_list.Add(transls_dic[npz_files[playing_file_index]]);
-                num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
-                m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][0], transls_dic[npz_files[playing_file_index]][1], transls_dic[npz_files[playing_file_index]][2]));
-
-            }
-            else
-            {
-                for (int i = 0; i < shapes.shape[0]; i++)
-                {
-                    shapes_list.Add(shapes_dic[npz_files[playing_file_index]][i]);
-                    poses_list.Add(poses_dic[npz_files[playing_file_index]][i]);
-                    transls_list.Add(transls_dic[npz_files[playing_file_index]][i]);
-                    num_frames_list.Add(num_frames_dic[npz_files[playing_file_index]]);
-                    m_initialBodyPositionsData_list.Add(new Vector3(transls_dic[npz_files[playing_file_index]][i][0], transls_dic[npz_files[playing_file_index]][i][1], transls_dic[npz_files[playing_file_index]][i][2]));
-                }
-            }
-            */
+            //poses = poses_dic[npz_files[playing_file_index]];
+            //transls = transls_dic[npz_files[playing_file_index]];
+            //fps = fps_dic[npz_files[playing_file_index]];
+            //num_frames = compute_num_frames(poses,single_shape_paramenters);
+            //m_initialBodyPositionsData = compute_initial_trans(transls, single_shape_paramenters);
         }
     }
 
     /// @ Functions for outer use
-    public int get_num_frames()
+    public int get_num_frames(int body_id )
     {
-        return num_frames;
+        return num_frames_dic[npz_files[playing_file_index]][body_id];
     }
     public float get_fps()
     {
-        return fps;
+        return fps_dic[npz_files[playing_file_index]];
     }
     public int get_playing_frame_index() { return playing_frame_index; }
     public void update_slider(int playing_frame_index)
     {
-        progress_slider.value = playing_frame_index / fps;
+        progress_slider.value = playing_frame_index / fps_dic[npz_files[playing_file_index]];
     }
     public void update_play_frame(int new_frame_index)
     {
         playing_frame_index = new_frame_index;
-        playing_timer = new_frame_index / fps;
+        playing_timer = new_frame_index / fps_dic[npz_files[playing_file_index]];
     }
     public string get_playing_filename()
     {
@@ -864,13 +903,25 @@ public class PoseStation : MonoBehaviour
         copied_shapes = np.empty(new int[] { 0 });
         copied_transls = np.empty(new int[] { 0 });
 
-        copied_fps = fps;
-        int start_index = calculate_frame_index(start_time, fps);
-        int end_index = calculate_frame_index(end_time, fps);
+        copied_fps = fps_dic[npz_files[playing_file_index]];
+        int start_index = calculate_frame_index(start_time, fps_dic[npz_files[playing_file_index]]);
+        int end_index = calculate_frame_index(end_time, fps_dic[npz_files[playing_file_index]]);
         copied_num_frames = end_index - start_index + 1;
-        if (copy_shape) { copied_shapes = shapes; }
-        copied_poses = poses[$"{start_index}:{end_index+1},:"];
-        copied_transls = transls[$"{start_index}:{end_index+1},:"];
+        if (single_shape_paramenters)
+        {
+            if (copy_shape) { copied_shapes = shapes_dic[npz_files[playing_file_index]].Clone(); }
+            copied_poses = poses_dic[npz_files[playing_file_index]][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_transls = transls_dic[npz_files[playing_file_index]][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_fps = fps_dic[npz_files[playing_file_index]];
+        }
+        else
+        {
+            if (copy_shape) { copied_shapes = shapes_dic[npz_files[playing_file_index]][playing_body_id].Clone(); }
+            copied_poses = poses_dic[npz_files[playing_file_index]][playing_body_id][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_transls = transls_dic[npz_files[playing_file_index]][playing_body_id][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_fps = fps_dic[npz_files[playing_file_index]];
+        }
+
     }
     public void cut_slice(float start_time, float end_time, bool copy_shape)
     {
@@ -881,65 +932,127 @@ public class PoseStation : MonoBehaviour
         copied_shapes = np.empty(new int[] { 0 });
         copied_transls = np.empty(new int[] { 0 });
 
-        copied_fps = fps;
-        int start_index = calculate_frame_index(start_time, fps);
-        int end_index = calculate_frame_index(end_time, fps);
+        copied_fps = fps_dic[npz_files[playing_file_index]];
+        int start_index = calculate_frame_index(start_time, fps_dic[npz_files[playing_file_index]]);
+        int end_index = calculate_frame_index(end_time, fps_dic[npz_files[playing_file_index]]);
         copied_num_frames = end_index - start_index + 1;
-        if (copy_shape) { copied_shapes = shapes; }
-        copied_poses = poses[$"{start_index}:{end_index + 1},:"];
-        copied_transls = transls[$"{start_index}:{end_index + 1},:"];
 
-        // Apply edit to playing cache
-        num_frames -= copied_num_frames;
-        poses = DeleteRange(poses, start_index, end_index);
-        transls = DeleteRange(transls, start_index, end_index);
+        if (single_shape_paramenters)
+        {
+            if (copy_shape) { copied_shapes = shapes_dic[npz_files[playing_file_index]].Clone(); }
+            copied_poses = poses_dic[npz_files[playing_file_index]][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_transls = transls_dic[npz_files[playing_file_index]][$"{start_index}:{end_index + 1},:"].Clone();
+            copied_fps = fps_dic[npz_files[playing_file_index]];
 
-        // Apply edit to laod cache
-        poses_dic[npz_files[playing_file_index]] = poses;
-        transls_dic[npz_files[playing_file_index]] = transls;
-        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+            // Apply edit to playing cache
+            num_frames_dic[npz_files[playing_file_index]][playing_body_id] -= copied_num_frames;
+            poses_dic[npz_files[playing_file_index]] = DeleteRange(poses_dic[npz_files[playing_file_index]], start_index, end_index);
+            transls_dic[npz_files[playing_file_index]] = DeleteRange(transls_dic[npz_files[playing_file_index]], start_index, end_index);
+        }
+        else
+        {
+            if (copy_shape) { copied_shapes = shapes_dic[npz_files[playing_file_index]][playing_body_id]; }
+            copied_poses = poses_dic[npz_files[playing_file_index]][playing_body_id][$"{start_index}:{end_index + 1},:"];
+            copied_transls = transls_dic[npz_files[playing_file_index]][playing_body_id][$"{start_index}:{end_index + 1},:"];
+            copied_fps = fps_dic[npz_files[playing_file_index]];    
+        }
     }
     public void replace_slice(int replace_start_index, int replace_end_index, bool copy_shape)
     {
-        Debug.Log($"old shape: {poses.Shape}");
-        Debug.Log($"replace {replace_start_index}-{replace_end_index}");
-        Debug.Log($"copied shape: {copied_poses.Shape}");
-        Debug.Log($"new shape: {DeleteRange(poses, replace_start_index, replace_end_index).Shape}");
-
-        if (!copy_shape)
+        if (copied_fps != fps_dic[npz_files[playing_file_index]])
         {
-            copied_shapes = shapes;
+            copied_poses = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_poses);
+            copied_transls = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_transls);
         }
 
-        num_frames = num_frames - (replace_end_index - replace_start_index + 1) + copied_num_frames;
-        poses = Insert2DArray(DeleteRange(poses, replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
-        transls = Insert2DArray(DeleteRange(transls, replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+        if (single_shape_paramenters)
+        {
+            if (copy_shape)
+            {
+                //shapes = copied_shapes;
+                shapes_dic[npz_files[playing_file_index]] = copied_shapes;
+            }
 
-        // Apply edit to laod cache
-        poses_dic[npz_files[playing_file_index]] = poses;
-        transls_dic[npz_files[playing_file_index]] = transls;
-        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+            num_frames_dic[npz_files[playing_file_index]][playing_body_id] = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - (replace_end_index - replace_start_index + 1) + copied_num_frames;
+            poses_dic[npz_files[playing_file_index]] = Insert2DArray(DeleteRange(poses_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
+            transls_dic[npz_files[playing_file_index]] = Insert2DArray(DeleteRange(transls_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+        }
+        else
+        {
+            if (copy_shape)
+            {
+                shapes_dic[npz_files[playing_file_index]] = copied_shapes;
+            }
+
+            num_frames_dic[npz_files[playing_file_index]][playing_body_id] = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - (replace_end_index - replace_start_index + 1) + copied_num_frames;
+            poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(poses_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
+            transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(transls_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+
+        }
     }
     public void paste_slice(int insert_index, bool copy_shape)
     {
-        if (!copy_shape)
+        if (copied_fps != fps_dic[npz_files[playing_file_index]])
         {
-            copied_shapes = shapes;
+            copied_poses = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_poses);
+            copied_transls = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_transls);
         }
 
-        num_frames += copied_num_frames;
-        poses = Insert2DArray(poses, copied_poses, insert_index, false);
-        transls = Insert2DArray(transls, copied_transls, insert_index, true);
+        if (single_shape_paramenters)
+        {
+            if (copy_shape)
+            {
+                //shapes = copied_shapes;
+                //shapes_dic[npz_files[playing_file_index]] = copied_shapes;
+                
+            }
+/*            var orientation_difference = poses_dic[npz_files[playing_file_index]][insert_index][$":{3}"] - copied_poses[0][$":{3}"];
+            SN.Matrix4x4 rotX = SN.Matrix4x4.CreateRotationX(np.asscalar<float>(orientation_difference[0]));
+            SN.Matrix4x4 rotY = SN.Matrix4x4.CreateRotationY(np.asscalar<float>(orientation_difference[1]));
+            SN.Matrix4x4 rotZ = SN.Matrix4x4.CreateRotationZ(np.asscalar<float>(orientation_difference[2]));
+            SN.Matrix4x4 rotationMatrix = rotZ * rotY * rotX;
 
-        // Apply edit to laod cache
-        poses_dic[npz_files[playing_file_index]] = poses;
-        transls_dic[npz_files[playing_file_index]] = transls;
-        num_frames_dic[npz_files[playing_file_index]] = num_frames;
+            for (int i = 0; i < copied_transls.shape[1]; i++)
+            {
+                SN.Vector3 trans = new SN.Vector3(np.asscalar<float>(copied_transls[i, 0]), np.asscalar<float>(copied_transls[i, 1]), np.asscalar<float>(copied_transls[i, 2]));
+                SN.Vector3 rotated_trans = SN.Vector3.Transform(trans, rotationMatrix);
+                Debug.Log("--------------------------------------------------------------");
+                Debug.Log($"diff:  {orientation_difference}");
+                Debug.Log($"trans: {trans}");
+                Debug.Log($"rotat: {rotated_trans}");
+                Debug.Log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
+                float[] rotat = new float[] { rotated_trans.X, rotated_trans.Y, rotated_trans.Z };
+                copied_transls[i] = np.array(rotat);
+            }*/
+
+            num_frames_dic[npz_files[playing_file_index]][playing_body_id] += copied_num_frames;
+            poses_dic[npz_files[playing_file_index]] = Insert2DArray(poses_dic[npz_files[playing_file_index]], copied_poses, insert_index, false, true);
+            transls_dic[npz_files[playing_file_index]] = Insert2DArray(transls_dic[npz_files[playing_file_index]], copied_transls, insert_index, true, false);
+        }
+        else
+        {
+            if (copy_shape)
+            {
+                //shapes[playing_body_id] = copied_shapes;
+                shapes_dic[npz_files[playing_file_index]][playing_body_id] = copied_shapes;
+            }
+
+            num_frames_dic[npz_files[playing_file_index]][playing_body_id] += copied_num_frames;
+            poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(poses_dic[npz_files[playing_file_index]][playing_body_id], copied_poses, insert_index, false);
+            transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(transls_dic[npz_files[playing_file_index]][playing_body_id], copied_transls, insert_index, true);
+
+            // Apply edit to laod cache
+            //poses_dic[npz_files[playing_file_index]][playing_body_id] = poses[playing_body_id];
+            //transls_dic[npz_files[playing_file_index]][playing_body_id] = transls[playing_body_id];
+        }
+
     }
-    public static NDArray Insert2DArray(NDArray original, NDArray insert, int insertIndex, bool align)
+    public static NDArray Insert2DArray(NDArray original, NDArray insert_copy, int insertIndex, bool align_trans=false, bool align_orientation = false)
     {
+        NDArray insert = insert_copy.copy();
         var originalShape = original.shape;
         var insertShape = insert.shape;
+
 
         if (originalShape.Length != 2 || insertShape.Length != 2)
         {
@@ -951,12 +1064,20 @@ public class PoseStation : MonoBehaviour
             throw new ArgumentException("Both original and insert NDArray must have the same number of columns.");
         }
 
-        if(align)
+        if(align_trans)
         {
-            var insert_difference = original[insertIndex] - insert[0];
+            var insert_trans_difference = original[insertIndex] - insert[0];
             for (int i = 0; i < insert.shape[0]; i++)
             {
-                insert[i] += insert_difference;
+                insert[i] += insert_trans_difference;
+            }
+        }
+        if (align_orientation)
+        {
+            var insert_orientation_difference = original[insertIndex][$":{3}"] - insert[0][$":{3}"];
+            for (int i = 0; i < insert.shape[0]; i++)
+            {
+                insert[i][$":{3}"] += insert_orientation_difference;
             }
         }
 
@@ -964,13 +1085,13 @@ public class PoseStation : MonoBehaviour
         var result = np.zeros(resultShape);
 
         // Copy part before insert point into result
-        result[$":{insertIndex + 1}, :"] = original[$"0:{insertIndex + 1}, :"];
+        result[$":{insertIndex+1}, :"] = original[$":{insertIndex+1}, :"];
 
         // Copy insert part into result 
-        result[$"{insertIndex + 1}:{insertIndex + insertShape[0] + 1}, :"] = insert;
+        result[$"{insertIndex+1}:{insertIndex +1 + insertShape[0]}, :"] = insert;
 
-        var last_part = original[$"{insertIndex + 1}:, :"];
-        if (align)
+        var last_part = original[$"{insertIndex+1}:, :"];
+        if (align_trans)
         {
             int insert_length = insert.shape[0];
             var insert_difference = insert[insert_length - 1] - last_part[0];
@@ -979,55 +1100,131 @@ public class PoseStation : MonoBehaviour
                 last_part[i] += insert_difference;
             }
         }
-        result[$"{insertIndex + insertShape[0] + 1}:, :"] = last_part;
-
+        if (align_orientation)
+        {
+            int insert_length = insert.shape[0];
+            var last_orientation_difference = insert[insert_length - 1][$":{3}"] - last_part[0][$":{3}"];
+            for (int i = 0; i < last_part.shape[0]; i++)
+            {
+                last_part[i][$":{3}"] += last_orientation_difference;
+            }
+        }
+        result[$"{insertIndex +1 + insert.shape[0]}:, :"] = last_part;
+                
         return result;
     }
+    /*    public static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
+        {
+            // Get the original shape
+            var originalShape = array.shape;
+
+            // check the index validation
+            if (start < 0 || end >= originalShape[axis] || start > end)
+            {
+                throw new ArgumentException("Invalid start or end index.");
+            }
+
+            // Compute new shape
+            var newShape = new int[originalShape.Length];
+            Array.Copy(originalShape, newShape, originalShape.Length);
+            newShape[axis] -= (end - start + 1);
+
+            // create new NDArray
+            var result = np.zeros(newShape);
+
+            // construct the slice
+            var beforeSlice = new Slice[originalShape.Length];
+            var afterSlice = new Slice[originalShape.Length];
+            var resultBeforeSlice = new Slice[originalShape.Length];
+            var resultAfterSlice = new Slice[originalShape.Length];
+
+            for (int i = 0; i < originalShape.Length; i++)
+            {
+                beforeSlice[i] = new Slice();
+                afterSlice[i] = new Slice();
+                resultBeforeSlice[i] = new Slice();
+                resultAfterSlice[i] = new Slice();
+            }
+
+            beforeSlice[axis] = new Slice(stop: start);
+            afterSlice[axis] = new Slice(start: end + 1);
+            resultBeforeSlice[axis] = new Slice(stop: start);
+            resultAfterSlice[axis] = new Slice(start: start);
+
+            // copy part before deleted part to new NDArray
+            result[resultBeforeSlice] = array[beforeSlice];
+
+            // copy part after deleted part to new NDArray
+            result[resultAfterSlice] = array[afterSlice];
+
+            return result;
+        }
+    */
     public static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
     {
-        // Get the original shape
         var originalShape = array.shape;
 
-        // check the index validation
+        // validate index
         if (start < 0 || end >= originalShape[axis] || start > end)
         {
             throw new ArgumentException("Invalid start or end index.");
         }
 
-        // Compute new shape
-        var newShape = new int[originalShape.Length];
+        // new shape
+        var newShape = new int[originalShape.Length]; // keep the dimension number same
         Array.Copy(originalShape, newShape, originalShape.Length);
         newShape[axis] -= (end - start + 1);
 
-        // create new NDArray
+        // ndarray to store result
         var result = np.zeros(newShape);
 
-        // construct the slice
-        var beforeSlice = new Slice[originalShape.Length];
-        var afterSlice = new Slice[originalShape.Length];
-        var resultBeforeSlice = new Slice[originalShape.Length];
-        var resultAfterSlice = new Slice[originalShape.Length];
-
-        for (int i = 0; i < originalShape.Length; i++)
+        // slicing
+        if (axis == 0)
         {
-            beforeSlice[i] = new Slice();
-            afterSlice[i] = new Slice();
-            resultBeforeSlice[i] = new Slice();
-            resultAfterSlice[i] = new Slice();
+            result[$":{start}, :"] = array[$":{start}, :"];
+            result[$"{start}:{newShape[0]+1}, :"] = array[$"{end + 1}:, :"];
         }
-
-        beforeSlice[axis] = new Slice(stop: start);
-        afterSlice[axis] = new Slice(start: end + 1);
-        resultBeforeSlice[axis] = new Slice(stop: start);
-        resultAfterSlice[axis] = new Slice(start: start);
-
-        // copy part before deleted part to new NDArray
-        result[resultBeforeSlice] = array[beforeSlice];
-
-        // copy part after deleted part to new NDArray
-        result[resultAfterSlice] = array[afterSlice];
+        else if (axis == 1)
+        {
+            result[$":, :{start}"] = array[$":, :{start}"];
+            result[$":, {start}:{newShape[1]}"] = array[$":, {end + 1}:"];
+        }
+        // reserve for higher dimensions.
 
         return result;
     }
+    private static NDArray AdjustFrameRate(float target_fps, float old_fps, NDArray data)
+    {
+        if (data.ndim != 3)
+        {
+            throw new ArgumentException("can not adjust frame rate for ndim non-equal 2.");
+        }
 
+        int original_num_frames = data.shape[0];
+        int new_num_frames = (int)Math.Round((original_num_frames * (double)target_fps) / old_fps);
+
+        int columns = data.shape[1];
+        NDArray adjusted_data = np.zeros((new_num_frames, columns));
+
+        // Linear Interpolation
+        for (int i = 0; i < new_num_frames; i++)
+        {
+            double t = (double)i / (new_num_frames - 1) * (original_num_frames - 1);
+            int index = (int)t;
+            double fraction = t - index;
+
+            for (int j = 0; j < columns; j++)
+            {
+                if (index + 1 < original_num_frames)
+                {
+                    adjusted_data[i, j] = (1 - fraction) * data[index, j] + fraction * data[index + 1, j];
+                }
+                else
+                {
+                    adjusted_data[i, j] = data[index, j];
+                }
+            }
+        }
+        return adjusted_data;
+    }
 }   

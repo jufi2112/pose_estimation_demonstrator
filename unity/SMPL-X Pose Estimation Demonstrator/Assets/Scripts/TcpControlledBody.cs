@@ -188,6 +188,7 @@ public class TcpControlledBody : MonoBehaviour
             foreach (Vector3 rotation in m_initialRotationEulerAngles)
                 gameObject.transform.Rotate(rotation);
             gameObject.transform.position += m_initialTranslation;
+            gameObject.transform.Rotate(-90, 0, 0);
             m_initialPosition = gameObject.transform.position;
             m_rotationLastFrame = gameObject.transform.localRotation.eulerAngles;
             m_setupComplete = true;

@@ -23,8 +23,11 @@ public class ControllUI : MonoBehaviour
     private InputField end_point_input;
     private InputField copied_file_input;
     private Toggle copy_shape_toggle;
+    private ToggleGroup body_toggle_group;
+    private Toggle body1, body2, body3, body4;
     private float slice_start_time = 0.0f;
     private float slice_end_time = 0.0f;
+    private bool editor_table_state = false;
 
     private bool on_drag = false;
     private bool last_play_state = false;
@@ -48,7 +51,7 @@ public class ControllUI : MonoBehaviour
             progress_slider.minValue = 0;
             if (m_PoseStationScript != null)
             {
-                progress_slider.maxValue = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+                progress_slider.maxValue = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
             }
         }
         else
@@ -60,7 +63,7 @@ public class ControllUI : MonoBehaviour
         total_time = GameObject.Find("TotalTime").GetComponent<Text>();
         if (total_time != null && m_PoseStationScript != null)
         {
-            float total_time_sec = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+            float total_time_sec = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
 
             total_time.text = FormatTime(total_time_sec);
         }
@@ -165,6 +168,57 @@ public class ControllUI : MonoBehaviour
         else
         {
             Debug.Log($"in {this.name} CopyShapeToggle not Found!");
+        }
+
+        // Get Body Toggles
+        body1 = GameObject.Find("Body1").GetComponent<Toggle>();
+        if(body1==null) { Debug.Log($"in {this.name} Body1 Toggle not Found!"); }
+        body2 = GameObject.Find("Body2").GetComponent<Toggle>();
+        if (body2 == null) { Debug.Log($"in {this.name} Body2 Toggle not Found!"); }
+        body3 = GameObject.Find("Body3").GetComponent<Toggle>();
+        if (body3 == null) { Debug.Log($"in {this.name} Body3 Toggle not Found!"); }
+        body4 = GameObject.Find("Body4").GetComponent<Toggle>();
+        if (body4 == null) { Debug.Log($"in {this.name} Body4 Toggle not Found!"); }
+        int num_body = m_PoseStationScript.get_num_body();
+        if (num_body == 4)
+        {
+            body1.isOn = true;
+        }
+        else if (num_body == 3)
+        {
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else if (num_body == 2)
+        {
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else if (num_body == 1)
+        {
+            body2.gameObject.SetActive(false);
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else
+        {
+            body1.gameObject.SetActive(false);
+            body2.gameObject.SetActive(false);
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+        }
+
+        // Get Body Toggle Group
+        body_toggle_group = GameObject.Find("BodyToggleGroup").GetComponent<ToggleGroup>();
+        if (body_toggle_group != null)
+        {
+            
+        }
+        else
+        {
+            Debug.Log($"in {this.name} BodyToggleGroup not Found!");
         }
     }
     void Update()
@@ -293,30 +347,64 @@ public class ControllUI : MonoBehaviour
     public void change_file()
     {
         m_PoseStationScript.change_file(file_name_dropdown.value);
-        float total_record_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+        float total_record_time = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps(); // --------- PTC
         total_time.text = FormatTime(total_record_time);
         progress_slider.maxValue = total_record_time;
         start_point_input.text = "00:00:00";
         end_point_input.text = "00:00:00";
         slice_start_time = 0.0f;
         slice_end_time = 0.0f;
+
+        int num_body = m_PoseStationScript.get_num_body();
+        Debug.Log($"-------------{num_body}");
+        if (num_body == 4)
+        {
+            body1.isOn = true;
+        }
+        else if (num_body == 3)
+        {
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else if (num_body == 2)
+        {
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else if (num_body == 1)
+        {
+            body2.gameObject.SetActive(false);
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+            body1.isOn = true;
+        }
+        else
+        {
+            body1.gameObject.SetActive(false);
+            body2.gameObject.SetActive(false);
+            body3.gameObject.SetActive(false);
+            body4.gameObject.SetActive(false);
+        }
     }
 
     /// @ Editor Table Control
     public void show_hide_editor_control()
     {
-        if (editor_control_canvas.enabled == true)
+        if (editor_table_state == true)
         {
             editor_control_canvas.enabled = false;
             editor_info_canvas.enabled = false;
+            editor_table_state = false;
         }
         else
         {
             editor_control_canvas.enabled = true;
             editor_info_canvas.enabled = true;
+            editor_table_state = true;
         }
     }
-
+    public bool get_editor_table_state() { return editor_table_state; }  
     /// @ Copy and Paste Function
     public void choose_start_point()
     {
@@ -362,9 +450,9 @@ public class ControllUI : MonoBehaviour
         else
         {
             m_PoseStationScript.copy_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
-            Debug.Log($"filename: {m_PoseStationScript.get_playing_filename()}");
+
             string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
-            Debug.Log($"copied_file_text: {copied_file_text}");
+
             copied_file_input.text = copied_file_text;
         }
     }
@@ -376,22 +464,28 @@ public class ControllUI : MonoBehaviour
         }
         else
         {
-            m_PoseStationScript.cut_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
-
+            m_PoseStationScript.pause();
             string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
-            float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+            m_PoseStationScript.cut_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
+            float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
+            if (progress_slider.value > new_total_time)
+            {
+                progress_slider.value = new_total_time;
+                m_PoseStationScript.set_playing_timer(new_total_time);
+            }
             progress_slider.maxValue = new_total_time;
             total_time.text = FormatTime(new_total_time);
             copied_file_input.text = copied_file_text;
+            m_PoseStationScript.resume(last_play_state);
         }
     }
     public void paste_slice()
     {
         int insert_index = (int)(progress_slider.value * m_PoseStationScript.get_fps());
 
-        m_PoseStationScript.paste_slice(insert_index, true);
+        m_PoseStationScript.paste_slice(insert_index, copy_shape_toggle.isOn);
 
-        float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+        float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
         progress_slider.maxValue = new_total_time;
         total_time.text = FormatTime(new_total_time);
     }
@@ -405,13 +499,33 @@ public class ControllUI : MonoBehaviour
         {
             int replace_start_index = (int)(slice_start_time * m_PoseStationScript.get_fps());
             int replace_end_index = (int)(slice_end_time * m_PoseStationScript.get_fps());
-
-            m_PoseStationScript.replace_slice(replace_start_index, replace_end_index, true);
-
-            float new_total_time = m_PoseStationScript.get_num_frames() / m_PoseStationScript.get_fps();
+                        
+            m_PoseStationScript.pause();
+            progress_slider.value = slice_start_time;
+            m_PoseStationScript.replace_slice(replace_start_index, replace_end_index, copy_shape_toggle.isOn); 
+            float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
             progress_slider.maxValue = new_total_time;
+            m_PoseStationScript.set_playing_timer(progress_slider.value);
+            m_PoseStationScript.resume(last_play_state);
             total_time.text = FormatTime(new_total_time);
         }
 
+    }
+
+    public void toggle_body1()
+    {
+        m_PoseStationScript.set_playing_body_id(0);
+    }
+    public void toggle_body2()
+    {
+        m_PoseStationScript.set_playing_body_id(1);
+    }
+    public void toggle_body3()
+    {
+        m_PoseStationScript.set_playing_body_id(2);
+    }
+    public void toggle_body4()
+    {
+        m_PoseStationScript.set_playing_body_id(3);
     }
 }
