@@ -22,11 +22,13 @@ public class ControllUI : MonoBehaviour
     private InputField start_point_input;
     private InputField end_point_input;
     private InputField copied_file_input;
-    private Toggle copy_shape_toggle;
+    private Toggle align_orientation_toggle;
     private ToggleGroup body_toggle_group;
     private Toggle body1, body2, body3, body4;
+    private Canvas slice_warning_canvas;
     private float slice_start_time = 0.0f;
     private float slice_end_time = 0.0f;
+    private bool slice_flag = false;
     private bool editor_table_state = false;
 
     private bool on_drag = false;
@@ -98,7 +100,14 @@ public class ControllUI : MonoBehaviour
         file_name_dropdown = GameObject.Find("FileNameDropdown").GetComponent<Dropdown>();
         if (file_name_dropdown != null)
         {
+            List<string> file_names = m_PoseStationScript.get_npz_files();
+            List<string> seqnum_file_names = new List<string>();
+            for(int i=0; i<file_names.Count;i++)
+            {
+                seqnum_file_names.Add((i + 1) + "." + file_names[i]);
+            }
             file_name_dropdown.AddOptions(m_PoseStationScript.get_npz_files());
+            //file_name_dropdown.AddOptions(seqnum_file_names);
             file_name_dropdown.value = 0;
         }
         else
@@ -159,11 +168,11 @@ public class ControllUI : MonoBehaviour
             Debug.Log($"in {this.name} CopiedFile not Found!");
         }
 
-        // Get Copy Shape Toggle
-        copy_shape_toggle = GameObject.Find("CopyShapeToggle").GetComponent<Toggle>();
-        if (copy_shape_toggle != null)
+        // Get Align Orientation Toggle
+        align_orientation_toggle = GameObject.Find("AignOrientationToggle").GetComponent<Toggle>();
+        if (align_orientation_toggle != null)
         {
-            copy_shape_toggle.isOn = true;
+            align_orientation_toggle.isOn = true;
         }
         else
         {
@@ -219,6 +228,17 @@ public class ControllUI : MonoBehaviour
         else
         {
             Debug.Log($"in {this.name} BodyToggleGroup not Found!");
+        }
+
+        // Get Slice Warning Canvas
+        slice_warning_canvas = GameObject.Find("SliceWarning").GetComponent<Canvas>();
+        if (slice_warning_canvas != null)
+        {
+            slice_warning_canvas.enabled = false;
+        }
+        else
+        {
+            Debug.Log($"in {this.name} SliceWarning not Found!");
         }
     }
     void Update()
@@ -354,9 +374,9 @@ public class ControllUI : MonoBehaviour
         end_point_input.text = "00:00:00";
         slice_start_time = 0.0f;
         slice_end_time = 0.0f;
+        slice_flag = false;
 
         int num_body = m_PoseStationScript.get_num_body();
-        Debug.Log($"-------------{num_body}");
         if (num_body == 4)
         {
             body1.isOn = true;
@@ -408,7 +428,7 @@ public class ControllUI : MonoBehaviour
     /// @ Copy and Paste Function
     public void choose_start_point()
     {
-        if (progress_slider.value < slice_end_time)
+        if (slice_flag && progress_slider.value > slice_end_time)
         {
             slice_start_time = slice_end_time;
         }
@@ -417,6 +437,8 @@ public class ControllUI : MonoBehaviour
             slice_start_time = progress_slider.value;
         }
         start_point_input.text = FormatTime(slice_start_time);
+        Debug.Log($"choose start, slider:{FormatTime(progress_slider.value)}, start:{FormatTime(slice_start_time)}");
+        Debug.Log($"slider max: {FormatTime(progress_slider.maxValue)}");
     }
     public void cancel_start_choose()
     {
@@ -434,6 +456,8 @@ public class ControllUI : MonoBehaviour
             slice_end_time = progress_slider.value;
         }
         end_point_input.text = FormatTime(slice_end_time);
+        Debug.Log($"choose end, slider:{FormatTime(progress_slider.value)}, end:{FormatTime(slice_start_time)}");
+        Debug.Log($"slider max: {FormatTime(progress_slider.maxValue)}");
     }
     public void cancel_end_choose()
     {
@@ -445,11 +469,12 @@ public class ControllUI : MonoBehaviour
     {
         if(slice_end_time < slice_start_time)
         {
-            throw new Exception("End Point should not be less than Start Point");
+            //throw new Exception("End Point should not be less than Start Point");
+            slice_warning_canvas.enabled = true;
         }
         else
         {
-            m_PoseStationScript.copy_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
+            m_PoseStationScript.copy_slice(slice_start_time, slice_end_time, align_orientation_toggle.isOn);
 
             string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
 
@@ -460,13 +485,19 @@ public class ControllUI : MonoBehaviour
     {
         if (slice_end_time < slice_start_time)
         {
-            throw new Exception("End Point should not be less than Start Point");
+            //throw new Exception("End Point should not be less than Start Point");
+            slice_warning_canvas.enabled = true;
         }
         else
         {
+            last_play_state = m_PoseStationScript.get_continue_stop();
             m_PoseStationScript.pause();
+            
             string copied_file_text = "Copied: " + m_PoseStationScript.get_playing_filename();
-            m_PoseStationScript.cut_slice(slice_start_time, slice_end_time, copy_shape_toggle.isOn);
+
+            //Debug.Log($"total time -cut: {m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps()}");
+
+            m_PoseStationScript.cut_slice(slice_start_time, slice_end_time, align_orientation_toggle.isOn);
             float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
             if (progress_slider.value > new_total_time)
             {
@@ -476,42 +507,75 @@ public class ControllUI : MonoBehaviour
             progress_slider.maxValue = new_total_time;
             total_time.text = FormatTime(new_total_time);
             copied_file_input.text = copied_file_text;
+
+            //Debug.Log($"total time +cut: {new_total_time}");
+            //Debug.Log($"slider max +cut: {FormatTime(progress_slider.maxValue)}");
+
             m_PoseStationScript.resume(last_play_state);
+
         }
     }
     public void paste_slice()
     {
+        last_play_state = m_PoseStationScript.get_continue_stop();
+        m_PoseStationScript.pause();
+
         int insert_index = (int)(progress_slider.value * m_PoseStationScript.get_fps());
 
-        m_PoseStationScript.paste_slice(insert_index, copy_shape_toggle.isOn);
-
+        //Debug.Log($"total time -paste: {m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps()}");
+        m_PoseStationScript.paste_slice(insert_index, align_orientation_toggle.isOn);
         float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
         progress_slider.maxValue = new_total_time;
         total_time.text = FormatTime(new_total_time);
+
+        //Debug.Log($"total time +paste: {new_total_time}");
+        //Debug.Log($"slider max +paste: {FormatTime(progress_slider.maxValue)}");
+
+        m_PoseStationScript.resume(last_play_state);
+
     }
     public void replace_slice()
     {
+        
         if (slice_end_time < slice_start_time)
         {
-            throw new Exception("End Point should not be less than Start Point");
+            //throw new Exception($"End Point should not be less than Start Point (start:{slice_start_time}, end:{slice_end_time})");
+            slice_warning_canvas.enabled = true;
         }
         else
         {
             int replace_start_index = (int)(slice_start_time * m_PoseStationScript.get_fps());
             int replace_end_index = (int)(slice_end_time * m_PoseStationScript.get_fps());
-                        
+
+
+            last_play_state = m_PoseStationScript.get_continue_stop();
             m_PoseStationScript.pause();
+
             progress_slider.value = slice_start_time;
-            m_PoseStationScript.replace_slice(replace_start_index, replace_end_index, copy_shape_toggle.isOn); 
+            //Debug.Log($"total time -replace: {m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps()}");
+            m_PoseStationScript.replace_slice(replace_start_index, replace_end_index, align_orientation_toggle.isOn); 
             float new_total_time = m_PoseStationScript.get_num_frames(m_PoseStationScript.get_playing_body_id()) / m_PoseStationScript.get_fps(); // --------- PTC
+
             progress_slider.maxValue = new_total_time;
             m_PoseStationScript.set_playing_timer(progress_slider.value);
-            m_PoseStationScript.resume(last_play_state);
             total_time.text = FormatTime(new_total_time);
+
+            //Debug.Log($"total time +replace: {new_total_time}");
+            //Debug.Log($"slider max +replace: {FormatTime(progress_slider.maxValue)}");
+
+            m_PoseStationScript.resume(last_play_state);
         }
 
     }
+    public void save()
+    {
+        m_PoseStationScript.save_npz();
+    }
 
+    public void hide_sliceWarning()
+    {
+        slice_warning_canvas.enabled = false;
+    }
     public void toggle_body1()
     {
         m_PoseStationScript.set_playing_body_id(0);
@@ -528,4 +592,6 @@ public class ControllUI : MonoBehaviour
     {
         m_PoseStationScript.set_playing_body_id(3);
     }
+
+    
 }

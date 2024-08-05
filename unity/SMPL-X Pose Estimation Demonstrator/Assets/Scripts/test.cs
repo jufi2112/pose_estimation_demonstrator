@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+//using System.IO.Compression;
 using System;
 using System.Linq;
 using System.Text;
@@ -9,6 +10,7 @@ using UnityEngine;
 using NumSharp;
 using NumSharp.Utilities;
 using Ionic.Zip;
+using System.Text.RegularExpressions;
 public static class NpySaver
 {
     public static void SaveFloatToNpy(float value, string filePath)
@@ -82,27 +84,112 @@ public class test : MonoBehaviour
     string path = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\army_poses_stageii\mocap_frame_rate.npy";
     string path_npz = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\army_poses_stageii.npz";
     string path_betas = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\betas.npy";
+    string path_fps = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\mocap_frame_rate.npy";
     string path_poses = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset\jumping_jacks_stageii\poses.npy";
+    string test_path = @"J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP_CG_Vis\Code\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Test";
     string save = @"D:\Dataset\";
     // Start is called before the first frame update
     void Start()
     {
-        NDArray shapes = np.load(path_betas);
-        NDArray poses = np.load(path_poses);
-        Debug.Log($"poses.Shape{poses.shape[0]}");
-        float fps_single = 120;
-        NDArray fps_arr = np.asscalar<float>(fps_single);
-        np.save(save + "pose_0", poses[0]);
-        np.save(save + "shapes", shapes);
-        //np.save(save + "mocap_fps", fps_arr);
-        NpySaver.SaveFloatToNpy(fps_single, save + "mocap_fps.npy");
-        var zip = new ZipFile();
-        zip.AddFile(save + "pose_0.npy", "");
-        zip.AddFile(save + "shapes.npy", "");
-        zip.AddFile(save + "mocap_frame_rate.npy", "");
-        zip.Save(save + "new.npz");
+        /*        NDArray shapes = np.load(path_betas);
+                NDArray poses = np.load(path_poses);
+                Debug.Log($"poses.Shape{poses.shape[0]}");
+                float fps_single = 120;
+                NDArray fps_arr = np.asscalar<float>(fps_single);
+                np.save(save + "pose_0", poses[0]);
+                np.save(save + "shapes", shapes);
+                //np.save(save + "mocap_fps", fps_arr);
+                NpySaver.SaveFloatToNpy(fps_single, save + "mocap_fps.npy");
+                var zip = new ZipFile();
+                zip.AddFile(save + "pose_0.npy", "");
+                zip.AddFile(save + "shapes.npy", "");
+                zip.AddFile(save + "mocap_frame_rate.npy", "");
+                zip.Save(save + "new.npz");*/
+
+        float fps = 120;
+
+        // 创建一个单个浮点数
+        double singleFloat = 59.99;
+
+        string filePath = save + "mocap_fps.npy";
+        // 创建文件流
+        using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+        {
+            using (var writer = new BinaryWriter(fs))
+            {
+                // 写入 .npy 文件头部
+                writer.Write((byte)0x93); // magic string
+                writer.Write(Encoding.ASCII.GetBytes("NUMPY"));
+                writer.Write((byte)0x01); // major version number
+                writer.Write((byte)0x00); // minor version number
+
+                // 构建描述符
+                string header = "{'descr': '<f8', 'fortran_order': False, 'shape': (), }";
+                int paddingLength = 64 - ((10 + header.Length) % 64);
+                header = header.PadRight(header.Length + paddingLength);
+
+                writer.Write((short)header.Length); // header length
+                writer.Write(Encoding.ASCII.GetBytes(header)); // header content
+                //writer.Write("\n");
+
+                // 写入浮点数数据
+                // 写入浮点数数据（小端字节序）
+                byte[] floatBytes = BitConverter.GetBytes(singleFloat);
+                if (BitConverter.IsLittleEndian == false)
+                {
+                    Array.Reverse(floatBytes);
+                }
+                writer.Write(floatBytes);
+            }
+        }
+
+
+        ///----------------------------------------------------------------
+        /// Pack .npz methos
+
+        
+        /*string npzFilePath = save + "testNpz.npz";
+        using (FileStream zipToOpen = new FileStream(npzFilePath, FileMode.Create))
+        {
+            using (ZipArchive archive = new ZipArchive(zipToOpen, ZipArchiveMode.Create))
+            {
+                archive.CreateEntryFromFile(path_fps, "mocap_frame_rate.npy");
+                archive.CreateEntryFromFile(path_poses, "poses.npy");
+                archive.CreateEntryFromFile(filePath, "mocap_fps.npy");
+            }
+        }*/
+        /*
+
+        // 定义 .npz 文件的保存路径
+        string npzFilePath = save + "testNpz.npz";
+
+        // 创建 .npz 文件并将 .npy 文件添加到其中
+        using (ZipFile zip = new ZipFile())
+        {
+            zip.AddFile(path_fps, "").FileName = "mocap_frame_rate.npy";
+            zip.AddFile(path_poses, "").FileName = "poses.npy";
+            zip.AddFile(filePath, "").FileName = "mocap_fps.npy";
+            zip.Save(npzFilePath);
+        }
+
+        ///----------------------------------------------------------------
+*/
+
+
+
 
     }
+
+    static bool IsValidPrefix(string filename, string prefix)
+    {
+        // 构建正则表达式模式
+        string pattern = @"^\**" + Regex.Escape(prefix);
+
+        // 使用正则表达式进行匹配
+        return Regex.IsMatch(filename, pattern);
+    }
+
+
     private static bool parseReader(BinaryReader reader, out int bytes, out Type t, out int[] shape)
     {
         bytes = 0;

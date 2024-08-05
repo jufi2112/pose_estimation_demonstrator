@@ -4,20 +4,25 @@ using UnityEngine.UI;
 using System;
 using System.IO;
 using System.Linq;
-using SN = System.Numerics;
+using System.Text;
 using Ionic.Zip;
 using NumSharp;
 using NumSharp.Utilities;
+using System.Text.RegularExpressions;
 
 public class PoseStation : MonoBehaviour
 {
-    //private string relativePath = "../../../dataset/MoSh/50002/jumping_jacks_stageii.npz";
     private string dataset_path_relative = "./Dataset";
+    private string projectRootPath;
     private bool single_shape_paramenters = true;
+    private FileSystemWatcher fileSystemWatcher;
+
+    private string modify_file_prefix = "Modified@"; // prefix to mark the editted file.
 
     // dict that stores for each body ID the interested body instances
-    Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
-    
+    private Dictionary<int, List<TcpControlledBody>> m_registeredBodies = new Dictionary<int, List<TcpControlledBody>>();
+
+    private List<string> npz_files_stored = new List<string>();
     private List<string> npz_files = new List<string>();
     private readonly System.Object locker_initialBodyPositionData = new System.Object();
         
@@ -51,17 +56,25 @@ public class PoseStation : MonoBehaviour
     private bool forward_backward = true; // true for forward, false for backward.
     private Slider progress_slider;
     private Dropdown boost_rate_dropdown;
+    private Dropdown file_name_dropdown;
+
+    private bool test = false;
 
     // Start is called before the first frame update
     void Start()
     {        
-        string projectRootPath = Application.dataPath;  
+        projectRootPath = Application.dataPath;  
         
         string dataset_path = Path.GetFullPath(Path.Combine(projectRootPath, dataset_path_relative));
-        
-        if(Directory.Exists(dataset_path))
+                
+        if (Directory.Exists(dataset_path))
         {
             string[] npz_files_paths = Directory.GetFiles(dataset_path, "*.npz", SearchOption.TopDirectoryOnly).Where(file => !file.EndsWith(".meta")).ToArray();
+
+            npz_files_stored
+               = npz_files_paths
+                    .Select(file => Path.GetFileNameWithoutExtension(file))
+                    .ToList();
 
             if (npz_files_paths.Length !=0)
             {
@@ -82,19 +95,18 @@ public class PoseStation : MonoBehaviour
                         }
                         else
                         {
+                            /// Here reserved for multiple body datas in one .npz file,
+                            /// the following Codes are not validated. 
                             for (int j=0; j<shapes_dic[npz_files[i]].shape[0];j++)
                             {
                                 initialBodyPosition_dic[npz_files[i]] = compute_initial_trans(transls_dic[npz_files[i]], false);
                                 num_frames_dic[npz_files[i]][j] = poses_dic[npz_files[i]][j].shape[0];
                             }
                         }
-                        //num_frames_dic[npz_files[i]] = poses_dic[npz_files[i]].shape[0];
-                        //float[] trans = get_frame(0, transls_dic[npz_files[i]]);
-                        //m_initialBodyPositionsData_dic[npz_files[i]] = new Vector3(trans[0], trans[2], trans[1]);
                     }
                 }
+                load_npz_success = true;
 
-                //shapes = shapes_dic[npz_files[playing_file_index]];
                 if (shapes_dic[npz_files[playing_file_index]].ndim == 1)
                 {
                     single_shape_paramenters = true;
@@ -103,17 +115,6 @@ public class PoseStation : MonoBehaviour
                 {
                     single_shape_paramenters = false;
                 }
-                //poses = poses_dic[npz_files[playing_file_index]];
-                //transls = transls_dic[npz_files[playing_file_index]];
-                //fps = fps_dic[npz_files[playing_file_index]];
-                //num_frames = compute_num_frames(poses, single_shape_paramenters);
-                //m_initialBodyPositionsData = compute_initial_trans(transls, single_shape_paramenters); 
-                foreach(var file in npz_files)
-                {
-                    var orientation = poses_dic[file][0][$":{3}"];
-                    Debug.Log($"{file}: {orientation}");
-                }
-
             }
             else
             {
@@ -140,6 +141,22 @@ public class PoseStation : MonoBehaviour
             Debug.Log($"in {this.name} BoostRateDropdown not Found!");
         }
 
+        // Get File Name Dropdown
+        file_name_dropdown = GameObject.Find("FileNameDropdown").GetComponent<Dropdown>();
+        if (file_name_dropdown == null)
+        {
+            Debug.Log($"in {this.name} FileNameDropdown not Found!");
+        }
+
+        // Set system watcher.
+        fileSystemWatcher = new FileSystemWatcher(dataset_path, "*.npz");
+        fileSystemWatcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName;
+
+        fileSystemWatcher.Created += OnCreate;
+        fileSystemWatcher.Deleted += OnDelete;
+
+        fileSystemWatcher.EnableRaisingEvents = true;
+
     }
     void OnDestroy()
     {
@@ -148,13 +165,15 @@ public class PoseStation : MonoBehaviour
         transls_dic.Clear();
         fps_dic.Clear();
         m_registeredBodies.Clear();
-
+        fileSystemWatcher.EnableRaisingEvents = false;
+        fileSystemWatcher.Dispose();
     }
     void Update()
     {
         if (playing_frame_index == -1)
         {
             playing_timer = 0.0f;
+            playing_frame_index = 0;
         }
 
         /// @ replaying control logic here.
@@ -171,8 +190,8 @@ public class PoseStation : MonoBehaviour
             playing_frame_index = calculate_frame_index(playing_timer, fps_dic[npz_files[playing_file_index]]);
             if (forward_backward) 
             {
-                // now forward played to end
-                if (playing_frame_index > num_frames_dic[npz_files[playing_file_index]][playing_body_id] - 1)
+                // now forward played till end
+                if (playing_frame_index >= num_frames_dic[npz_files[playing_file_index]][playing_body_id] - 1)
                 {
                     playing_frame_index = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - 1;
                     playing_timer = num_frames_dic[npz_files[playing_file_index]][playing_body_id] / fps_dic[npz_files[playing_file_index]];
@@ -183,7 +202,7 @@ public class PoseStation : MonoBehaviour
             }
             else
             {
-                // now backward played to start
+                // now backward played till start
                 if (playing_frame_index < 0)
                 {
                     playing_frame_index = 0;
@@ -200,14 +219,13 @@ public class PoseStation : MonoBehaviour
         {
             // Load one frame data for rendering
             float[] shape = new float[16];
-            //(float[] pose, float[] trans) = load_one_frame(poses, transls, playing_frame_index);
             (float[] pose, float[] trans) = load_one_frame(poses_dic[npz_files[playing_file_index]], transls_dic[npz_files[playing_file_index]], playing_frame_index);
 
+            // Swap yz axis to align coordinate system
             trans = _swap_translation_yz_axes_single(trans);
-            if (single_shape_paramenters)
-            {
-                shape = get_shape_single(shapes_dic[npz_files[playing_file_index]]);
-            }
+
+            shape = get_shape_single(shapes_dic[npz_files[playing_file_index]]);
+
             List<TcpControlledBody> subscribers;
             if (m_registeredBodies.TryGetValue(1, out subscribers))
             {
@@ -215,30 +233,25 @@ public class PoseStation : MonoBehaviour
                 lock (locker_initialBodyPositionData)
                 {
                     initBodyPosition = initialBodyPosition_dic[npz_files[playing_file_index]][playing_body_id];
-                    //initBodyPosition = m_initialBodyPositionsData[0];
                 }
-                //trans = _add_x_angle_offset_to_pose(trans, -90);
                 Vector3 translationDifferenceData = new Vector3(trans[0], trans[1], trans[2]) - initBodyPosition;
                 foreach (TcpControlledBody sub in subscribers)
                 {
-                    if(continue_stop)
-                    {
-                        Debug.Log($"pose pelvis - {playing_frame_index} : [{pose[0]}, {pose[1]}, {pose[2]}");
-                    }
                     //sub.SetParameters(translationDifferenceData, _add_y_angle_offset_to_pose(_add_x_angle_offset_to_pose(pose, -90), 180), _adapt_betas_shape(shape));
-                    //sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
+                    sub.SetParameters(translationDifferenceData, _add_x_angle_offset_to_pose(pose, -90), _adapt_betas_shape(shape));
 
-                    sub.SetParameters(translationDifferenceData, pose, _adapt_betas_shape(shape));
+                    //sub.SetParameters(translationDifferenceData, pose, _adapt_betas_shape(shape));
                 }
             }
         }
         else
         {
+            /// Here reserved for multiple body datas in one .npz file,
+            /// the following Codes are not validated. 
             for (int i=0;i< shapes_dic[npz_files[playing_file_index]].shape[0];i++)
             {
                 // Load one frame data for rendering
                 float[] shape = new float[16];
-                //(float[] pose, float[] trans) = load_one_frame(poses[i], transls[i], playing_frame_index);
                 (float[] pose, float[] trans) = load_one_frame(poses_dic[npz_files[playing_file_index]], transls_dic[npz_files[playing_file_index]], playing_frame_index);
 
                 trans = _swap_translation_yz_axes_single(trans);
@@ -251,7 +264,6 @@ public class PoseStation : MonoBehaviour
                     lock (locker_initialBodyPositionData)
                     {
                         initBodyPosition = initialBodyPosition_dic[npz_files[playing_file_index]][playing_body_id];
-                        //initBodyPosition = m_initialBodyPositionsData[i];
                     }
                     Vector3 translationDifferenceData = new Vector3(trans[0], trans[1], trans[2]) - initBodyPosition;
                     foreach (TcpControlledBody sub in subscribers)
@@ -265,7 +277,80 @@ public class PoseStation : MonoBehaviour
         }    
     }
 
-    /// @ Load body pose data 
+    /// @@@ Watcher for dataset director changes
+    private void OnDelete(object source, FileSystemEventArgs e)
+    {
+        Debug.Log($"{e.Name} is deleted.");
+        string deleted_filename = Path.GetFileNameWithoutExtension(e.FullPath);
+        int deleted_index = npz_files.IndexOf(deleted_filename);
+        string playing_filename = npz_files[playing_file_index];
+
+        poses_dic.Remove(deleted_filename);
+        shapes_dic.Remove(deleted_filename);
+        transls_dic.Remove(deleted_filename);
+        fps_dic.Remove(deleted_filename);
+        num_frames_dic.Remove(deleted_filename);
+        initialBodyPosition_dic.Remove(deleted_filename);
+
+        if (deleted_index < 0)
+        {
+            throw new InvalidOperationException("Deleted file not in buffered files.");
+        }
+        else
+        {
+            npz_files.Remove(deleted_filename);
+            npz_files_stored.Remove(deleted_filename);
+            file_name_dropdown.options.RemoveAt(deleted_index);
+            
+            if (deleted_index == playing_file_index)
+            {
+                playing_file_index = 0;
+                file_name_dropdown.value = playing_file_index;
+            }
+            else if (deleted_index < playing_file_index)
+            {
+                playing_file_index = npz_files.IndexOf(playing_filename);
+                file_name_dropdown.value = playing_file_index;
+            }
+        }
+
+    }
+    private void OnCreate(object source, FileSystemEventArgs e)
+    {
+        string new_file_name_path = e.FullPath;
+        string npz_filename = Path.GetFileNameWithoutExtension(new_file_name_path);
+        npz_files.Add(npz_filename);
+        npz_files_stored.Add(npz_filename); 
+        (poses_dic[npz_filename], shapes_dic[npz_filename], transls_dic[npz_filename], fps_dic[npz_filename])
+            = _load_npz_attribute(new_file_name_path, "poses", "betas", "trans", "mocap_frame_rate");
+
+        if (shapes_dic[npz_filename].ndim == 1)
+        {
+            initialBodyPosition_dic[npz_filename] = compute_initial_trans(transls_dic[npz_filename],true);
+            num_frames_dic[npz_filename] = new int[] { poses_dic[npz_filename].shape[0] };
+        }
+        else
+        {
+            for (int i = 0; i < shapes_dic[npz_filename].shape[0]; i++)
+            {
+                initialBodyPosition_dic[npz_filename] = compute_initial_trans(transls_dic[npz_filename], false);
+                num_frames_dic[npz_filename][i] = poses_dic[npz_filename][i].shape[0];
+            }
+        }
+
+        string playing_file_name = file_name_dropdown.options[file_name_dropdown.value].text;
+        Debug.Log($"playing file_name: {playing_file_name}");
+
+        Dropdown.OptionData new_file = new Dropdown.OptionData(npz_filename);
+        file_name_dropdown.options.Add(new_file);
+        file_name_dropdown.RefreshShownValue();
+
+/*        file_name_dropdown.ClearOptions();
+        Debug.Log($"npz_files: {string.Join(",", npz_files)}");
+        file_name_dropdown.AddOptions(npz_files);*/
+    }
+    
+    /// @@@ Load body pose data 
 
     /// @ Modification of Numsharp Load for single value .npy file
     private static NDArray Load_Scalar_Npy(string path)
@@ -423,25 +508,8 @@ public class PoseStation : MonoBehaviour
 
         return littleEndian;
     }
-    
-    // Compute num_frames
-    private static int[] compute_num_frames(NDArray poses, bool single_shape_parameters)
-    {
-        List<int> frames = new List<int>();
-       if (single_shape_parameters) // Single body
-        {
-            frames.Add(poses.shape[0]);
-        }
-       else
-        {
-            for (int i=0; i<poses.shape[0];i++)
-            {
-                frames.Add(poses[i].shape[0]);
-            }
-        }
 
-        return frames.ToArray();
-    }
+
     private static Vector3[] compute_initial_trans(NDArray transls, bool single_shape_parameters)
     {
         List<Vector3> init_trans = new List<Vector3>();
@@ -468,7 +536,7 @@ public class PoseStation : MonoBehaviour
     {
         // Prepare the file paths
         string npz_name = Path.GetFileNameWithoutExtension(npz_file);
-        string extract_path = Path.Combine(Application.dataPath, "Dataset", npz_name);
+        string extract_path = Path.Combine(projectRootPath, "Dataset", npz_name);
         string poses_path = Path.Combine(extract_path, "poses.npy");
         string betas_path = Path.Combine(extract_path, "betas.npy");
         string trans_path = Path.Combine(extract_path, "trans.npy");
@@ -523,10 +591,10 @@ public class PoseStation : MonoBehaviour
                     entry.Extract(extract_path);
                 }
             }
-        }    
+        }
 
         // Check if every attribute exsits
-        if(!File.Exists(poses_path) ||
+        if (!File.Exists(poses_path) ||
         !File.Exists(betas_path) ||
         !File.Exists(trans_path))
         {
@@ -557,14 +625,14 @@ public class PoseStation : MonoBehaviour
             NDArray fps_NDArray = Load_Scalar_Npy(fps_path);
             fps_value = np.asscalar<float>(fps_NDArray);
         }
-        
+
         return (poses_NDArray,shapes_NDArray,trans_NDArray,fps_value);
     }
     // Read one frame from poses and trans, which ready to align to the 3D model
     private (float[], float[]) load_one_frame(NDArray poses, NDArray trans, int frame_index)
     {
         // float[] pose_frame = _add_x_angle_offset_to_pose(get_frame(frame_index,poses), -90f);
-        float[] pose_frame = get_frame(frame_index,poses);
+        float[] pose_frame = get_frame(frame_index, poses);
         // float[] trans_frame = _swap_translation_yz_axes_single(get_frame(frame_index, trans));
         float[] trans_frame = get_frame(frame_index, trans);
 
@@ -595,6 +663,8 @@ public class PoseStation : MonoBehaviour
         }
         return datas.ToArray();
     }
+    
+    /// @@@ Functions for correcting original data for Unity. 
     private float[] _adapt_betas_shape(float[] shape)
     {
         int delta_shape = n_shape_components - shape.Length;
@@ -631,11 +701,11 @@ public class PoseStation : MonoBehaviour
 
         return pose;
     }
-    private float[] _add_y_angle_offset_to_pose(float[] pose, float y_rot_angle_deg)
-    {        
+    /*private float[] _add_y_angle_offset_to_pose(float[] pose, float y_rot_angle_deg)
+    {
         Vector3 rotation_vector = new Vector3(pose[0], pose[1], pose[2]);
         Quaternion quat = FromRotationVector(rotation_vector);
-        Quaternion rotY = FromRotationVector(new Vector3(0, y_rot_angle_deg*Mathf.Deg2Rad, 0));
+        Quaternion rotY = FromRotationVector(new Vector3(0, y_rot_angle_deg * Mathf.Deg2Rad, 0));
         Vector3 rotated = AsRotationVector(rotY * quat);
 
         pose[0] = rotated.x;
@@ -643,8 +713,8 @@ public class PoseStation : MonoBehaviour
         pose[2] = rotated.z;
 
         return pose;
-    }
- 
+    }*/
+
     // turn rotation vector into a quaternion.
     private static Quaternion FromRotationVector(Vector3 rotationVector)
     {
@@ -679,7 +749,7 @@ public class PoseStation : MonoBehaviour
 
         if (sinHalfAngle < 0.001f) // 处理极小角度情况
         {
-            return new Vector3(q.x, q.y, q.z);
+            return new Vector3(q.x, q.y, q.z) * angle;
         }
         else
         {
@@ -691,7 +761,7 @@ public class PoseStation : MonoBehaviour
         return new float[] {trans[0], trans[2], trans[1]};
     }
 
-    /// @ Controll of body model
+    /// @@@ Control of body model
     public bool RegisterBody(GameObject interestedBodyGameObject, int bodyID)
     {
         if (!m_registeredBodies.ContainsKey(bodyID))
@@ -717,7 +787,7 @@ public class PoseStation : MonoBehaviour
         return m_registeredBodies[bodyID].Remove(bodyToUnregister);
     }
 
-    /// @ Replay functions (stop/continue, rewind, fast-forward)
+    /// @@@ Replay functions (stop/continue, rewind, fast-forward)
     public void ContinueStop()
     {   
         bool previous_play_state = continue_stop;
@@ -825,7 +895,7 @@ public class PoseStation : MonoBehaviour
     public void set_playing_timer(float timer)
     {
         playing_timer = timer;
-        playing_frame_index = (int)(timer * fps_dic[npz_files[playing_file_index]]);
+        playing_frame_index = (int)(timer * fps_dic[npz_files[playing_file_index]])-1;
     }
     public void set_boost_rate(float new_boost_rate)
     {
@@ -833,10 +903,12 @@ public class PoseStation : MonoBehaviour
     }
     public float get_booste_rate() { return boost_rate; }
 
+    /// @ Function reserved for multiple body datas in one .npz file, not validated.
     public int get_num_body() { return single_shape_paramenters ? 1 : shapes_dic[npz_files[playing_file_index]].shape[0]; }
     public int get_playing_body_id() { return playing_body_id; }
     public void set_playing_body_id(int new_body_id) { playing_body_id = new_body_id; }
-    /// @ Functions for File choose
+    
+    /// @@@ Functions for File choose
     public List<string> get_npz_files() {  return npz_files; }
     public void change_file(int file_index)
     {
@@ -852,7 +924,6 @@ public class PoseStation : MonoBehaviour
             playing_body_id = 0;
 
             // Init playing data
-            //shapes = shapes_dic[npz_files[playing_file_index]];
             if (shapes_dic[npz_files[playing_file_index]].ndim == 1)
             {
                 single_shape_paramenters = true;
@@ -861,15 +932,10 @@ public class PoseStation : MonoBehaviour
             {
                 single_shape_paramenters = false;
             }
-            //poses = poses_dic[npz_files[playing_file_index]];
-            //transls = transls_dic[npz_files[playing_file_index]];
-            //fps = fps_dic[npz_files[playing_file_index]];
-            //num_frames = compute_num_frames(poses,single_shape_paramenters);
-            //m_initialBodyPositionsData = compute_initial_trans(transls, single_shape_paramenters);
         }
     }
 
-    /// @ Functions for outer use
+    /// @@@ Functions for outer controller use
     public int get_num_frames(int body_id )
     {
         return num_frames_dic[npz_files[playing_file_index]][body_id];
@@ -893,7 +959,7 @@ public class PoseStation : MonoBehaviour
         return npz_files[playing_file_index];
     }
 
-    /// @ Editor Functions
+    /// @@@ Editor Functions
     public void copy_slice(float start_time, float end_time, bool copy_shape)
     {
         // 
@@ -937,6 +1003,46 @@ public class PoseStation : MonoBehaviour
         int end_index = calculate_frame_index(end_time, fps_dic[npz_files[playing_file_index]]);
         copied_num_frames = end_index - start_index + 1;
 
+        // Determine wheather to build a new buffer to buffer the editted data.
+        string cur_filename = npz_files[playing_file_index];
+        if (npz_files_stored.Contains(cur_filename))
+        {
+            string modified_filename = cur_filename;
+            if (IsPrefixed(cur_filename, modify_file_prefix)) // cur_filename has a prefix like "***Modified@" or "Modified@"
+            {
+                modified_filename = "@" + modified_filename;
+                while (npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
+            }
+            else // cur_filename has no modified prefix.
+            {
+                modified_filename = modify_file_prefix + modified_filename;
+                while (npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
+            }
+
+            poses_dic[modified_filename] = poses_dic[cur_filename];
+            shapes_dic[modified_filename] = shapes_dic[cur_filename];
+            transls_dic[modified_filename] = transls_dic[cur_filename];
+            fps_dic[modified_filename] = fps_dic[cur_filename];
+            num_frames_dic[modified_filename] = num_frames_dic[cur_filename];
+            initialBodyPosition_dic[modified_filename] = initialBodyPosition_dic[cur_filename];
+
+            if (!npz_files.Contains(modified_filename))
+            {
+                npz_files.Add(modified_filename);
+                Dropdown.OptionData option_modified_filename = new Dropdown.OptionData(modified_filename);
+                file_name_dropdown.options.Add(option_modified_filename);
+            }
+
+            playing_file_index = npz_files.IndexOf(modified_filename);
+            file_name_dropdown.value = playing_file_index;
+        }
+
         if (single_shape_paramenters)
         {
             if (copy_shape) { copied_shapes = shapes_dic[npz_files[playing_file_index]].Clone(); }
@@ -957,7 +1063,7 @@ public class PoseStation : MonoBehaviour
             copied_fps = fps_dic[npz_files[playing_file_index]];    
         }
     }
-    public void replace_slice(int replace_start_index, int replace_end_index, bool copy_shape)
+    public void replace_slice(int replace_start_index, int replace_end_index, bool align_orientation)
     {
         if (copied_fps != fps_dic[npz_files[playing_file_index]])
         {
@@ -965,32 +1071,66 @@ public class PoseStation : MonoBehaviour
             copied_transls = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_transls);
         }
 
-        if (single_shape_paramenters)
+        // Determine wheather to build a new buffer to buffer the editted data.
+        string cur_filename = npz_files[playing_file_index];
+        if (npz_files_stored.Contains(cur_filename))
         {
-            if (copy_shape)
+            string modified_filename = cur_filename;
+            if (IsPrefixed(cur_filename, modify_file_prefix)) // cur_filename has a prefix like "***Modified@" or "Modified@"
             {
-                //shapes = copied_shapes;
-                shapes_dic[npz_files[playing_file_index]] = copied_shapes;
+                modified_filename = "@" + modified_filename;
+                while (npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
+            }
+            else // cur_filename has no modified prefix.
+            {
+                modified_filename = modify_file_prefix + modified_filename;
+                while (npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
             }
 
+            poses_dic[modified_filename] = poses_dic[cur_filename];
+            shapes_dic[modified_filename] = shapes_dic[cur_filename];
+            transls_dic[modified_filename] = transls_dic[cur_filename];
+            fps_dic[modified_filename] = fps_dic[cur_filename];
+            num_frames_dic[modified_filename] = num_frames_dic[cur_filename];
+            initialBodyPosition_dic[modified_filename] = initialBodyPosition_dic[cur_filename];
+
+            if (!npz_files.Contains(modified_filename))
+            {
+                npz_files.Add(modified_filename);
+                Dropdown.OptionData option_modified_filename = new Dropdown.OptionData(modified_filename);
+                file_name_dropdown.options.Add(option_modified_filename);
+            }
+
+            playing_file_index = npz_files.IndexOf(modified_filename);
+            file_name_dropdown.value = playing_file_index;
+        }
+
+        if (single_shape_paramenters)
+        {
             num_frames_dic[npz_files[playing_file_index]][playing_body_id] = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - (replace_end_index - replace_start_index + 1) + copied_num_frames;
-            poses_dic[npz_files[playing_file_index]] = Insert2DArray(DeleteRange(poses_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
-            transls_dic[npz_files[playing_file_index]] = Insert2DArray(DeleteRange(transls_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+           (transls_dic[npz_files[playing_file_index]], poses_dic[npz_files[playing_file_index]])
+                = InsertTransPose(DeleteRange(transls_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_transls,
+                                    DeleteRange(poses_dic[npz_files[playing_file_index]], replace_start_index, replace_end_index), copied_poses,
+                                    replace_start_index - 1, align_orientation);
         }
         else
         {
-            if (copy_shape)
-            {
-                shapes_dic[npz_files[playing_file_index]] = copied_shapes;
-            }
-
             num_frames_dic[npz_files[playing_file_index]][playing_body_id] = num_frames_dic[npz_files[playing_file_index]][playing_body_id] - (replace_end_index - replace_start_index + 1) + copied_num_frames;
-            poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(poses_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
-            transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(transls_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
-
+            //poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(poses_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_poses, replace_start_index - 1, false);
+            //transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(DeleteRange(transls_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_transls, replace_start_index - 1, true);
+            (transls_dic[npz_files[playing_file_index]], poses_dic[npz_files[playing_file_index]])
+                = InsertTransPose(DeleteRange(transls_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_transls,
+                                    DeleteRange(poses_dic[npz_files[playing_file_index]][playing_body_id], replace_start_index, replace_end_index), copied_poses,
+                                    replace_start_index - 1, align_orientation);
         }
     }
-    public void paste_slice(int insert_index, bool copy_shape)
+    public void paste_slice(int insert_index, bool align_orientation)
     {
         if (copied_fps != fps_dic[npz_files[playing_file_index]])
         {
@@ -998,54 +1138,103 @@ public class PoseStation : MonoBehaviour
             copied_transls = AdjustFrameRate(fps_dic[npz_files[playing_file_index]], copied_fps, copied_transls);
         }
 
+        // Determine wheather to build a new buffer to buffer the editted data.
+        string cur_filename = npz_files[playing_file_index];
+        if (npz_files_stored.Contains(cur_filename))
+        {
+            string modified_filename = cur_filename;
+            if (IsPrefixed(cur_filename, modify_file_prefix)) // cur_filename has a prefix like "***Modified@" or "Modified@"
+            {
+                modified_filename = "@" + modified_filename;
+                while(npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
+            }
+            else // cur_filename has no modified prefix.
+            {
+                modified_filename = modify_file_prefix + modified_filename;
+                while (npz_files_stored.Contains(modified_filename))
+                {
+                    modified_filename = "@" + modified_filename;
+                }
+            }
+
+            poses_dic[modified_filename] = poses_dic[cur_filename];
+            shapes_dic[modified_filename] = shapes_dic[cur_filename];
+            transls_dic[modified_filename] = transls_dic[cur_filename];
+            fps_dic[modified_filename] = fps_dic[cur_filename];
+            num_frames_dic[modified_filename] = num_frames_dic[cur_filename];
+            initialBodyPosition_dic[modified_filename] = initialBodyPosition_dic[cur_filename];
+
+            if (!npz_files.Contains(modified_filename))
+            {
+                npz_files.Add(modified_filename);
+                Dropdown.OptionData option_modified_filename = new Dropdown.OptionData(modified_filename);
+                file_name_dropdown.options.Add(option_modified_filename);
+            }
+
+            playing_file_index = npz_files.IndexOf(modified_filename);
+            file_name_dropdown.value = playing_file_index;
+        }
+        /*if (!cur_filename.StartsWith(modify_file_prefix))
+        {
+            string modified_filename = modify_file_prefix + cur_filename;
+            while (npz_files_stored.Contains(modified_filename))
+            {
+                modified_filename = "*" + modified_filename;
+            }
+            npz_files.Add(modified_filename);
+
+            poses_dic[modified_filename] = poses_dic[cur_filename];
+            shapes_dic[modified_filename] = shapes_dic[cur_filename];
+            transls_dic[modified_filename] = transls_dic[cur_filename];
+            fps_dic[modified_filename] = fps_dic[cur_filename];
+            num_frames_dic[modified_filename] = num_frames_dic[cur_filename];
+            initialBodyPosition_dic[modified_filename] = initialBodyPosition_dic[cur_filename];
+
+            playing_file_index = npz_files.IndexOf(modified_filename);
+            Dropdown.OptionData option_modified_filename = new Dropdown.OptionData(modified_filename);
+            file_name_dropdown.options.Add(option_modified_filename);
+
+            file_name_dropdown.value = playing_file_index;
+        }*/
+
         if (single_shape_paramenters)
         {
-            if (copy_shape)
-            {
-                //shapes = copied_shapes;
-                //shapes_dic[npz_files[playing_file_index]] = copied_shapes;
-                
-            }
-/*            var orientation_difference = poses_dic[npz_files[playing_file_index]][insert_index][$":{3}"] - copied_poses[0][$":{3}"];
-            SN.Matrix4x4 rotX = SN.Matrix4x4.CreateRotationX(np.asscalar<float>(orientation_difference[0]));
-            SN.Matrix4x4 rotY = SN.Matrix4x4.CreateRotationY(np.asscalar<float>(orientation_difference[1]));
-            SN.Matrix4x4 rotZ = SN.Matrix4x4.CreateRotationZ(np.asscalar<float>(orientation_difference[2]));
-            SN.Matrix4x4 rotationMatrix = rotZ * rotY * rotX;
-
-            for (int i = 0; i < copied_transls.shape[1]; i++)
-            {
-                SN.Vector3 trans = new SN.Vector3(np.asscalar<float>(copied_transls[i, 0]), np.asscalar<float>(copied_transls[i, 1]), np.asscalar<float>(copied_transls[i, 2]));
-                SN.Vector3 rotated_trans = SN.Vector3.Transform(trans, rotationMatrix);
-                Debug.Log("--------------------------------------------------------------");
-                Debug.Log($"diff:  {orientation_difference}");
-                Debug.Log($"trans: {trans}");
-                Debug.Log($"rotat: {rotated_trans}");
-                Debug.Log("++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++");
-                float[] rotat = new float[] { rotated_trans.X, rotated_trans.Y, rotated_trans.Z };
-                copied_transls[i] = np.array(rotat);
-            }*/
-
             num_frames_dic[npz_files[playing_file_index]][playing_body_id] += copied_num_frames;
-            poses_dic[npz_files[playing_file_index]] = Insert2DArray(poses_dic[npz_files[playing_file_index]], copied_poses, insert_index, false, true);
-            transls_dic[npz_files[playing_file_index]] = Insert2DArray(transls_dic[npz_files[playing_file_index]], copied_transls, insert_index, true, false);
+            //poses_dic[npz_files[playing_file_index]] = Insert2DArray(poses_dic[npz_files[playing_file_index]], copied_poses, insert_index, false, align_orientation);
+            //transls_dic[npz_files[playing_file_index]] = Insert2DArray(transls_dic[npz_files[playing_file_index]], copied_transls, insert_index, true, false);
+            (transls_dic[npz_files[playing_file_index]], poses_dic[npz_files[playing_file_index]]) 
+                = InsertTransPose(transls_dic[npz_files[playing_file_index]], copied_transls,
+                poses_dic[npz_files[playing_file_index]], copied_poses,
+                insert_index, align_orientation);
         }
         else
         {
-            if (copy_shape)
-            {
-                //shapes[playing_body_id] = copied_shapes;
-                shapes_dic[npz_files[playing_file_index]][playing_body_id] = copied_shapes;
-            }
-
-            num_frames_dic[npz_files[playing_file_index]][playing_body_id] += copied_num_frames;
-            poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(poses_dic[npz_files[playing_file_index]][playing_body_id], copied_poses, insert_index, false);
-            transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(transls_dic[npz_files[playing_file_index]][playing_body_id], copied_transls, insert_index, true);
+            //if (copy_shape)
+            //{
+            //    //shapes[playing_body_id] = copied_shapes;
+            //    shapes_dic[npz_files[playing_file_index]][playing_body_id] = copied_shapes;
+            //}
+            //
+            //num_frames_dic[npz_files[playing_file_index]][playing_body_id] += copied_num_frames;
+            //poses_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(poses_dic[npz_files[playing_file_index]][playing_body_id], copied_poses, insert_index, false);
+            //transls_dic[npz_files[playing_file_index]][playing_body_id] = Insert2DArray(transls_dic[npz_files[playing_file_index]][playing_body_id], copied_transls, insert_index, true);
 
             // Apply edit to laod cache
             //poses_dic[npz_files[playing_file_index]][playing_body_id] = poses[playing_body_id];
             //transls_dic[npz_files[playing_file_index]][playing_body_id] = transls[playing_body_id];
         }
 
+    }
+    private static bool IsPrefixed(string filename, string prefix)
+    {
+        // 构建正则表达式模式
+        string pattern = @"^\@*" + Regex.Escape(prefix);
+
+        // 使用正则表达式进行匹配
+        return Regex.IsMatch(filename, pattern);
     }
     public static NDArray Insert2DArray(NDArray original, NDArray insert_copy, int insertIndex, bool align_trans=false, bool align_orientation = false)
     {
@@ -1074,12 +1263,39 @@ public class PoseStation : MonoBehaviour
         }
         if (align_orientation)
         {
-            var insert_orientation_difference = original[insertIndex][$":{3}"] - insert[0][$":{3}"];
+            Vector3 insert_0 
+                = new Vector3(np.asscalar<float>(insert[0,0].Clone()),
+                                np.asscalar<float>(insert[0,1].Clone()), 
+                                np.asscalar<float>(insert[0,2].Clone()));
+            Vector3 original_insertIndex 
+                = new Vector3(np.asscalar<float>(original[insertIndex,0]), 
+                                np.asscalar<float>(original[insertIndex,1]), 
+                                np.asscalar<float>(original[insertIndex,2]));
+
+            Quaternion q_insert_0 
+                = Quaternion.AngleAxis(insert_0.magnitude * Mathf.Rad2Deg, insert_0.normalized);
+            Quaternion q_original_insertIndex 
+                = Quaternion.AngleAxis(original_insertIndex.magnitude * Mathf.Rad2Deg, original_insertIndex.normalized);
+            Quaternion q_rel 
+                = q_original_insertIndex * Quaternion.Inverse(q_insert_0);
+
             for (int i = 0; i < insert.shape[0]; i++)
             {
-                insert[i][$":{3}"] += insert_orientation_difference;
+                Vector3 cur = new Vector3(np.asscalar<float>(insert[i, 0]), np.asscalar<float>(insert[i, 1]), np.asscalar<float>(insert[i, 2]));
+                                
+                Quaternion q_cur = Quaternion.AngleAxis(cur.magnitude*Mathf.Rad2Deg, cur.normalized);
+
+                q_cur = q_rel * q_cur;
+
+                q_cur.ToAngleAxis(out float theta, out cur);
+                cur = cur * theta * Mathf.Deg2Rad;
+
+                insert[i, 0] = cur.x;
+                insert[i, 1] = cur.y;
+                insert[i, 2] = cur.z;
             }
         }
+        
 
         var resultShape = new Shape(originalShape[0] + insertShape[0], originalShape[1]);
         var result = np.zeros(resultShape);
@@ -1099,19 +1315,173 @@ public class PoseStation : MonoBehaviour
             {
                 last_part[i] += insert_difference;
             }
-        }
+        }        
+        
         if (align_orientation)
         {
             int insert_length = insert.shape[0];
-            var last_orientation_difference = insert[insert_length - 1][$":{3}"] - last_part[0][$":{3}"];
+            //var last_orientation_difference = insert[insert_length - 1][$":{3}"] - last_part[0][$":{3}"];
+            var last_orientation_difference = last_part[0][$":{3}"] - insert[insert_length - 1][$":{3}"];
+
+            Vector3 last_0 
+                = new Vector3(np.asscalar<float>(last_part[0, 0]),
+                                np.asscalar<float>(last_part[0, 1]),
+                                np.asscalar<float>(last_part[0, 2]));
+            Vector3 insert_end 
+                = new Vector3(np.asscalar<float>(insert[insert_length - 1, 0]),
+                                np.asscalar<float>(insert[insert_length - 1, 1]),
+                                np.asscalar<float>(insert[insert_length - 1, 2]));
+
+            Quaternion q_last_0 = Quaternion.AngleAxis(last_0.magnitude * Mathf.Rad2Deg, last_0.normalized);
+            Quaternion q_insert_end = Quaternion.AngleAxis(insert_end.magnitude * Mathf.Rad2Deg, insert_end.normalized);
+            Quaternion q_rel = q_insert_end * Quaternion.Inverse(q_last_0);
+
             for (int i = 0; i < last_part.shape[0]; i++)
             {
-                last_part[i][$":{3}"] += last_orientation_difference;
+                Vector3 cur = new Vector3(np.asscalar<float>(last_part[i, 0]), np.asscalar<float>(last_part[i, 1]), np.asscalar<float>(last_part[i, 2]));
+
+                Quaternion q_cur = Quaternion.AngleAxis(cur.magnitude * Mathf.Rad2Deg, cur.normalized);
+
+                q_cur = q_rel * q_cur;
+
+                q_cur.ToAngleAxis(out float theta, out cur);
+
+                cur = cur * theta * Mathf.Deg2Rad;
+
+                last_part[i, 0] = cur.x;
+                last_part[i, 1] = cur.y;
+                last_part[i, 2] = cur.z;
             }
         }
+        
         result[$"{insertIndex +1 + insert.shape[0]}:, :"] = last_part;
                 
         return result;
+    }
+    public static (NDArray, NDArray) InsertTransPose(NDArray trans_original,NDArray trans_copy,NDArray pose_original, NDArray pose_copy, int insertIndex, bool align_orientation = false)
+    {
+        NDArray trans_insert = trans_copy.copy();
+        NDArray pose_insert = pose_copy.copy();
+
+        if (trans_original.shape.Length != 2 || pose_original.shape.Length != 2
+            || trans_insert.shape.Length !=2 || pose_insert.shape.Length != 2)
+        {
+            throw new ArgumentException("Both original and insert NDArray must be 2-dimensional.");
+        }
+
+        if (trans_original.shape[1] != trans_insert.shape[1] || pose_original.shape[1] != pose_insert.shape[1])
+        {
+            throw new ArgumentException("Both original and insert NDArray must have the same number of columns.");
+        }
+
+        if (align_orientation)
+        {
+            Vector3 pose_insert_0 = new Vector3(np.asscalar<float>(pose_insert[0, 0]),
+                                            np.asscalar<float>(pose_insert[0, 1]),
+                                            np.asscalar<float>(pose_insert[0, 2]));
+            Vector3 pose_original_insertIndex = new Vector3(np.asscalar<float>(pose_original[insertIndex, 0]),
+                                                        np.asscalar<float>(pose_original[insertIndex, 1]),
+                                                        np.asscalar<float>(pose_original[insertIndex, 2]));
+
+            Quaternion q_pose_insert_0 = Quaternion.AngleAxis(pose_insert_0.magnitude * Mathf.Rad2Deg, pose_insert_0.normalized);
+            Quaternion q_pose_original_insertIndex = Quaternion.AngleAxis(pose_original_insertIndex.magnitude * Mathf.Rad2Deg, pose_original_insertIndex.normalized);
+            Quaternion q_pose_rel = q_pose_original_insertIndex * Quaternion.Inverse(q_pose_insert_0);
+
+            for (int i = 0; i < pose_insert.shape[0]; i++)
+            {
+                Vector3 pose_cur = new Vector3(np.asscalar<float>(pose_insert[i, 0]), np.asscalar<float>(pose_insert[i, 1]), np.asscalar<float>(pose_insert[i, 2]));
+                Quaternion q_pose_cur = Quaternion.AngleAxis(pose_cur.magnitude * Mathf.Rad2Deg, pose_cur.normalized);
+
+                q_pose_cur = q_pose_rel * q_pose_cur;
+                q_pose_cur.ToAngleAxis(out float theta, out pose_cur);
+                pose_cur = pose_cur * theta * Mathf.Deg2Rad;
+
+                pose_insert[i, 0] = pose_cur.x; pose_insert[i, 1] = pose_cur.y; pose_insert[i, 2] = pose_cur.z;
+            }
+
+            // Adjust corresponding translation orientation
+            for (int i=0; i < trans_insert.shape[0]; i++)
+            {
+                Vector3 trans_insert_cur = new Vector3(np.asscalar<float>(trans_insert[i][0]), np.asscalar<float>(trans_insert[i][1]), np.asscalar<float>(trans_insert[i][2]));
+                trans_insert_cur = q_pose_rel * trans_insert_cur;
+                trans_insert[i, 0] = trans_insert_cur.x; trans_insert[i, 1] = trans_insert_cur.y; trans_insert[i, 2] = trans_insert_cur.z;
+            }
+        }
+
+        // Align trans slice at beginning
+        var trans_insert_difference_beggining = trans_original[insertIndex] - trans_insert[0];
+        for (int i = 0; i < trans_insert.shape[0]; i++)
+        {
+            trans_insert[i] += trans_insert_difference_beggining;
+        }
+
+        var trans_result_shape = new Shape(trans_original.shape[0] + trans_insert.shape[0], trans_original.shape[1]);
+        var pose_result_shape = new Shape(pose_original.shape[0] + pose_insert.shape[0], pose_original.shape[1]);
+
+        var trans_result = np.zeros(trans_result_shape);
+        var pose_result = np.zeros(pose_result_shape);
+
+        // Copy part before insert point into result
+        trans_result[$":{insertIndex + 1}, :"] = trans_original[$":{insertIndex + 1}, :"];
+        pose_result[$":{insertIndex + 1}, :"] = pose_original[$":{insertIndex + 1}, :"];
+
+        // Copy insert part into result 
+        trans_result[$"{insertIndex + 1}:{insertIndex + 1 + trans_insert.shape[0]}, :"] = trans_insert;
+        pose_result[$"{insertIndex + 1}:{insertIndex + 1 + pose_insert.shape[0]}, :"] = pose_insert;
+
+        // Slice remaining part of original out
+        var trans_last_part = trans_original[$"{insertIndex + 1}:, :"];
+        var pose_last_part = pose_original[$"{insertIndex + 1}:, :"]; 
+
+        if (align_orientation)
+        {
+            int pose_insert_length = pose_insert.shape[0];
+
+            Vector3 pose_last_0 = new Vector3(np.asscalar<float>(pose_last_part[0, 0]),
+                                            np.asscalar<float>(pose_last_part[0, 1]),
+                                            np.asscalar<float>(pose_last_part[0, 2]));
+            Vector3 pose_insert_end = new Vector3(np.asscalar<float>(pose_insert[pose_insert_length - 1, 0]),
+                                                np.asscalar<float>(pose_insert[pose_insert_length - 1, 1]),
+                                                np.asscalar<float>(pose_insert[pose_insert_length - 1, 2]));
+
+            Quaternion q_pose_last_0 = Quaternion.AngleAxis(pose_last_0.magnitude * Mathf.Rad2Deg, pose_last_0.normalized);
+            Quaternion q_pose_insert_end = Quaternion.AngleAxis(pose_insert_end.magnitude * Mathf.Rad2Deg, pose_insert_end.normalized);
+            Quaternion q_pose_rel = q_pose_insert_end * Quaternion.Inverse(q_pose_last_0);
+
+            for (int i = 0; i < pose_last_part.shape[0]; i++)
+            {
+                Vector3 pose_cur = new Vector3(np.asscalar<float>(pose_last_part[i, 0]), np.asscalar<float>(pose_last_part[i, 1]), np.asscalar<float>(pose_last_part[i, 2]));
+                Quaternion q_pose_cur = Quaternion.AngleAxis(pose_cur.magnitude * Mathf.Rad2Deg, pose_cur.normalized);
+
+                q_pose_cur = q_pose_rel * q_pose_cur;
+                q_pose_cur.ToAngleAxis(out float theta, out pose_cur);
+                pose_cur = pose_cur * theta * Mathf.Deg2Rad;
+
+                pose_last_part[i, 0] = pose_cur.x; pose_last_part[i, 1] = pose_cur.y; pose_last_part[i, 2] = pose_cur.z;
+            }
+
+            // Adjust corresponding translation orientation
+            for (int i = 0; i < trans_last_part.shape[0]; i++)
+            {
+                Vector3 trans_last_part_cur = new Vector3(np.asscalar<float>(trans_last_part[i][0]), np.asscalar<float>(trans_last_part[i][1]), np.asscalar<float>(trans_last_part[i][2]));
+                trans_last_part_cur = q_pose_rel * trans_last_part_cur;
+                trans_last_part[i, 0] = trans_last_part_cur.x; trans_last_part[i, 1] = trans_last_part_cur.y; trans_last_part[i, 2] = trans_last_part_cur.z;
+            }
+        }
+
+        // Align trans slice at end.
+        int trans_insert_length = trans_insert.shape[0];
+        var trans_insert_difference_end = trans_insert[trans_insert_length - 1] - trans_last_part[0];
+        for (int i = 0; i < trans_last_part.shape[0]; i++)
+        {
+            trans_last_part[i] += trans_insert_difference_end;
+        }
+
+        // Add last part into result
+        trans_result[$"{insertIndex + 1 + trans_insert.shape[0]}:, :"] = trans_last_part;
+        pose_result[$"{insertIndex + 1 + pose_insert.shape[0]}:, :"] = pose_last_part;
+
+        return (trans_result, pose_result);
     }
     /*    public static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
         {
@@ -1160,7 +1530,7 @@ public class PoseStation : MonoBehaviour
             return result;
         }
     */
-    public static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
+    private static NDArray DeleteRange(NDArray array, int start, int end, int axis = 0)
     {
         var originalShape = array.shape;
 
@@ -1195,7 +1565,7 @@ public class PoseStation : MonoBehaviour
     }
     private static NDArray AdjustFrameRate(float target_fps, float old_fps, NDArray data)
     {
-        if (data.ndim != 3)
+        if (data.ndim != 2)
         {
             throw new ArgumentException("can not adjust frame rate for ndim non-equal 2.");
         }
@@ -1227,4 +1597,67 @@ public class PoseStation : MonoBehaviour
         }
         return adjusted_data;
     }
+    public void save_npz()
+    {
+        string dataset_path = Path.GetFullPath(Path.Combine(Application.dataPath, dataset_path_relative));
+        SavePoseToNpz(dataset_path, npz_files[playing_file_index],
+            poses_dic[npz_files[playing_file_index]], shapes_dic[npz_files[playing_file_index]],
+            transls_dic[npz_files[playing_file_index]], fps_dic[npz_files[playing_file_index]]);
+
+    }
+    private static void SavePoseToNpz(string filePath, string fileName, NDArray poses, NDArray betas, NDArray trans, float mocap_frame_rate)
+    {
+        string npyPath = filePath + "/" + fileName;
+        Directory.CreateDirectory(npyPath);
+        np.save(npyPath  + "/poses.npy", poses);
+        np.save(npyPath + "/betas.npy", betas);
+        np.save(npyPath + "/trans.npy", trans);
+        SaveSingleFloatToNpy(npyPath + "/mocap_frame_rate.npy", mocap_frame_rate);
+
+        // .npz file path
+        string npzFilePath = filePath + "/" + fileName + ".npz";
+
+        // zip .npy files into .npz file
+        using (ZipFile zip = new ZipFile())
+        {
+            zip.AddFile(npyPath + "/mocap_frame_rate.npy", "").FileName = "mocap_frame_rate.npy";
+            zip.AddFile(npyPath + "/trans.npy", "").FileName = "trans.npy";
+            zip.AddFile(npyPath + "/poses.npy", "").FileName = "poses.npy";
+            zip.AddFile(npyPath + "/betas.npy", "").FileName = "betas.npy";
+            zip.Save(npzFilePath);
+        }
+    }
+    // @ Function for saving single value to a non-array-structured .npy file.
+    private static void SaveSingleFloatToNpy(string filePath, float singleFloat)
+    {
+        double singleVaule = (double)singleFloat;
+        using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write))
+        {
+            using (var writer = new BinaryWriter(fs))
+            {
+                // write .npy header
+                writer.Write((byte)0x93); // magic string
+                writer.Write(Encoding.ASCII.GetBytes("NUMPY"));
+                writer.Write((byte)0x01); // major version number
+                writer.Write((byte)0x00); // minor version number
+
+                // Descriptor
+                string header = "{'descr': '<f8', 'fortran_order': False, 'shape': (), }";
+                int paddingLength = 64 - ((10 + header.Length) % 64);
+                header = header.PadRight(header.Length + paddingLength);
+
+                writer.Write((short)header.Length); // header length
+                writer.Write(Encoding.ASCII.GetBytes(header)); // header content
+
+                // write data
+                byte[] floatBytes = BitConverter.GetBytes(singleVaule);
+                if (BitConverter.IsLittleEndian == false)
+                {
+                    Array.Reverse(floatBytes);
+                }
+                writer.Write(floatBytes);
+            }
+        }
+    }
+
 }   

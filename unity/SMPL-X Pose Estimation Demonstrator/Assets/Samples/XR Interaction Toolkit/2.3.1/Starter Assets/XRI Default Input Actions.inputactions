@@ -641,9 +641,9 @@
                     "initialStateCheck": true
                 },
                 {
-                    "name": "Menu",
+                    "name": "PressA",
                     "type": "Button",
-                    "id": "6008396e-399a-46cc-adf2-62f59b879c63",
+                    "id": "11a12308-2f2f-49a3-869e-6c09ff496598",
                     "expectedControlType": "Button",
                     "processors": "",
                     "interactions": "",
@@ -785,12 +785,12 @@
                 },
                 {
                     "name": "",
-                    "id": "b74a238b-86ce-4d88-933d-b9ed392f12ab",
+                    "id": "89c38c23-0b49-4c65-82a3-d494b812dd32",
                     "path": "<XRController>{LeftHand}/{PrimaryButton}",
                     "interactions": "",
                     "processors": "",
                     "groups": "",
-                    "action": "Menu",
+                    "action": "PressA",
                     "isComposite": false,
                     "isPartOfComposite": false
                 }

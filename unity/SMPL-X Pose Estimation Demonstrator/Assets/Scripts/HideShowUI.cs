@@ -6,19 +6,24 @@ using UnityEngine.InputSystem;
 
 public class HideShowUI : MonoBehaviour
 {
-
-    public InputActionReference menu;
+    public InputActionReference pressA_action;
     private Canvas PlayerTable;
+    private GameObject PlayerBoard;
     private Canvas EidtorTable_Info;
     private Canvas EidtorTable_Control;
     private ControllUI control_UI_script;
 
     private void Start()
     {
-        if (menu != null)
+        if(pressA_action != null)
         {
-            menu.action.Enable();
-            menu.action.performed += ToggleMenu;
+            Debug.Log("--------------------pressA action not NULL.");
+            pressA_action.action.performed += ToggleMenu;
+        }
+        PlayerBoard = GameObject.Find("PlayerBoard");
+        if (PlayerBoard == null)
+        {
+            Debug.LogError("PlayerBoard object not found or does not have a Canvas component.");
         }
 
         PlayerTable = GameObject.Find("PlayerTable").GetComponent<Canvas>();
@@ -49,9 +54,11 @@ public class HideShowUI : MonoBehaviour
 
     private void ToggleMenu(InputAction.CallbackContext context)
     {
-        Debug.Log("Menu button pressed!");
+        Debug.Log($"Menu button pressed!");
 
-        if (control_UI_script.get_editor_table_state())
+        PlayerBoard.SetActive(!PlayerBoard.activeSelf);
+
+        /*if (control_UI_script.get_editor_table_state())
         {
             if (PlayerTable != null)
             {
@@ -74,6 +81,6 @@ public class HideShowUI : MonoBehaviour
             {
                 PlayerTable.enabled = !PlayerTable.enabled;
             }
-        }           
+        }*/
     }
 }
