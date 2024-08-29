@@ -34,11 +34,15 @@ Tested with Unity 2021.3.19f1 on Windows 11 and Ubuntu 22.04
 4. In `pose_estimation_demonstrator/pose_estimation/rgb-kinect-pose/src` run `./run_server.sh -c 10`
     - The pose estimation will take some time to start, even though it already produces output to the command line
 
+## Usage of VR-Replay Tool
+
+1. Copy the motion data `.npz` file into  `.\pose_estimation_demonstrator\unity\SMPL-X Pose Estimation Demonstrator\Assets\Dataset`.
+2. Start the program and open Scene `XR_Replay_Tool`.
+3. When you have VR devices, just put on your VR head-set, when not switch to `Scene` table for viewing.
+
 # Used Software
 We're using the following Unity packages inside of the demonstrator:
 - SMPL-X Unity Package [link](https://smpl-x.is.tue.mpg.de/index.html)
 - Pcx - Point Cloud Importer/Renderer for Unity [link](https://github.com/keijiro/Pcx)
 
-# Cmds saved for my own dev:
-**.npz path:** python tcp_client.py --producer -d 'J:\0-EDU\0-SoSe-2024\0-Lernveranstaltungen\MA-PR\KP CG&Vis\Code\pose_estimation_demonstrator\python\server\MoSh\00046\female_stagei.npz' --fps 10
 

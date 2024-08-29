@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.InputSystem;
 using UnityEngine.XR.Interaction.Toolkit;
+using System.Linq;
 
 
 public class ControllUI : MonoBehaviour
@@ -33,6 +34,7 @@ public class ControllUI : MonoBehaviour
 
     private bool on_drag = false;
     private bool last_play_state = false;
+    private bool file_name_dd_ready = false;
     #endregion
 
     // Start is called before the first frame update
@@ -45,6 +47,8 @@ public class ControllUI : MonoBehaviour
             m_PoseStationScript = pose_station.GetComponent<PoseStation>();
         }
 
+        //yield return new WaitUntil(() => m_PoseStationScript.get_loadNpzSucc());
+
         // Get Main Progress Slider
         progress_slider = GameObject.Find("MainProgressSlider").GetComponent<Slider>();
         if (progress_slider != null)
@@ -53,7 +57,12 @@ public class ControllUI : MonoBehaviour
             progress_slider.minValue = 0;
             if (m_PoseStationScript != null)
             {
-                progress_slider.maxValue = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
+                float max_value = 0.0f;
+                if (m_PoseStationScript.get_fps() > 0)
+                {
+                    max_value = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
+                }
+                progress_slider.maxValue = max_value;
             }
         }
         else
@@ -65,7 +74,9 @@ public class ControllUI : MonoBehaviour
         total_time = GameObject.Find("TotalTime").GetComponent<Text>();
         if (total_time != null && m_PoseStationScript != null)
         {
-            float total_time_sec = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
+            float total_time_sec = 0.0f;
+            if(m_PoseStationScript.get_fps() > 0)
+                total_time_sec = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
 
             total_time.text = FormatTime(total_time_sec);
         }
@@ -100,14 +111,15 @@ public class ControllUI : MonoBehaviour
         file_name_dropdown = GameObject.Find("FileNameDropdown").GetComponent<Dropdown>();
         if (file_name_dropdown != null)
         {
-            List<string> file_names = m_PoseStationScript.get_npz_files();
+            /*List<string> file_names = m_PoseStationScript.get_npz_files();
             List<string> seqnum_file_names = new List<string>();
-            for(int i=0; i<file_names.Count;i++)
+            for (int i = 0; i < file_names.Count; i++)
             {
                 seqnum_file_names.Add((i + 1) + "." + file_names[i]);
             }
+            file_name_dropdown.AddOptions(seqnum_file_names);*/
+            Debug.Log($"--------------ctrl UI: file Names: \n{string.Join("\n", m_PoseStationScript.get_npz_files())}");
             file_name_dropdown.AddOptions(m_PoseStationScript.get_npz_files());
-            //file_name_dropdown.AddOptions(seqnum_file_names);
             file_name_dropdown.value = 0;
         }
         else
@@ -124,8 +136,19 @@ public class ControllUI : MonoBehaviour
         else
         {
             Debug.Log($"in {this.name} EditorTable_Control not Found!");
+        }       
+        // Get Editor Info Canvas
+        editor_info_canvas = GameObject.Find("EditorTable_Info").GetComponent<Canvas>();
+        if (editor_info_canvas != null)
+        {
+            editor_info_canvas.enabled = false;
         }
-        
+        else
+        {
+            Debug.Log($"in {this.name} EditorTable_Info not Found!");
+        }
+
+
         // Get Start and End Point input.
         start_point_input = GameObject.Find("StartPoint").GetComponent<InputField>();
         if (start_point_input != null)
@@ -146,16 +169,6 @@ public class ControllUI : MonoBehaviour
             Debug.Log($"in {this.name} EndPoint not Found!");
         }
 
-        // Get Editor Info Canvas
-        editor_info_canvas = GameObject.Find("EditorTable_Info").GetComponent<Canvas>();
-        if (editor_info_canvas != null)
-        {
-            editor_info_canvas.enabled = false;
-        }
-        else
-        {
-            Debug.Log($"in {this.name} EditorTable_Info not Found!");
-        }
 
         // Get Copied Field input.
         copied_file_input = GameObject.Find("CopiedFile").GetComponent<InputField>();
@@ -282,13 +295,21 @@ public class ControllUI : MonoBehaviour
     }
     private void update_slider()
     {
-        float value = m_PoseStationScript.get_playing_frame_index()/m_PoseStationScript.get_fps();
+        float value = 0.0f;
+        if (m_PoseStationScript.get_fps() > 0)
+        {
+            value = m_PoseStationScript.get_playing_frame_index() / m_PoseStationScript.get_fps();
+        }
+         
         progress_slider.value = value;
     }
     private void update_play_time_text()
     {
-        float playing_time = m_PoseStationScript.get_playing_frame_index() / m_PoseStationScript.get_fps();
-        now_time.text = FormatTime(playing_time);
+
+        float current_time =0.0f;
+        if (m_PoseStationScript.get_fps() > 0)
+            current_time = m_PoseStationScript.get_playing_frame_index() / m_PoseStationScript.get_fps();
+        now_time.text = FormatTime(current_time);
     }
 
     /// @ Boost Rate Dropdown
@@ -367,7 +388,9 @@ public class ControllUI : MonoBehaviour
     public void change_file()
     {
         m_PoseStationScript.change_file(file_name_dropdown.value);
-        float total_record_time = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps(); // --------- PTC
+        float total_record_time = 0.0f;
+        if(m_PoseStationScript.get_fps() > 0)
+            total_record_time = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps(); // --------- PTC
         total_time.text = FormatTime(total_record_time);
         progress_slider.maxValue = total_record_time;
         start_point_input.text = "00:00:00";
@@ -508,9 +531,6 @@ public class ControllUI : MonoBehaviour
             total_time.text = FormatTime(new_total_time);
             copied_file_input.text = copied_file_text;
 
-            //Debug.Log($"total time +cut: {new_total_time}");
-            //Debug.Log($"slider max +cut: {FormatTime(progress_slider.maxValue)}");
-
             m_PoseStationScript.resume(last_play_state);
 
         }
@@ -567,10 +587,7 @@ public class ControllUI : MonoBehaviour
         }
 
     }
-    public void save()
-    {
-        m_PoseStationScript.save_npz();
-    }
+    public void save()  {        m_PoseStationScript.save_npz();    }
 
     public void hide_sliceWarning()
     {
@@ -593,5 +610,25 @@ public class ControllUI : MonoBehaviour
         m_PoseStationScript.set_playing_body_id(3);
     }
 
+    public void updateUI()
+    {
+        // Related Values
+        float max_value = 0.0f;
+        if (m_PoseStationScript.get_fps() > 0)
+        {
+            max_value = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
+        }
+        progress_slider.maxValue = max_value;
+        float total_time_sec = 0.0f;
+        if (m_PoseStationScript.get_fps() > 0)
+            total_time_sec = m_PoseStationScript.get_num_frames(0) / m_PoseStationScript.get_fps();
+
+        total_time.text = FormatTime(total_time_sec);
+
+    }
     
+    public void updateFilenameDropdown()
+    {
+        file_name_dropdown.RefreshShownValue();
+    }
 }

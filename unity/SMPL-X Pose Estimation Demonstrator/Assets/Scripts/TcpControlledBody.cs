@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine.InputSystem;
 using UnityEngine;
+using NumSharp;
 
 public class TcpControlledBody : MonoBehaviour
 {
@@ -287,6 +288,23 @@ public class TcpControlledBody : MonoBehaviour
         return true;
     }
 
+    public bool ResetBodyShape()
+    {
+        float[] shape = new float[10];
+        if (m_smplxScript == null)
+        {
+            return false;
+        }
+        if (shape.Length != 10)
+        {
+            Debug.Log(gameObject.name + ": Could not set body shape: The given array does not contain 10 elements!");
+            return false;
+        }
+        //Debug.Log($"SetBodyShape[{shape.Length}]: [{string.Join(",", shape)}]");
+        m_smplxScript.betas = shape;
+        m_smplxScript.SetBetaShapes();
+        return true;
+    }
     private bool FindAndAssignPOVCameraByTag(Transform parent, string tag)
     {
         for (int i = 0; i < parent.childCount; ++i)

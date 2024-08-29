@@ -106,7 +106,7 @@ public class test : MonoBehaviour
                 zip.AddFile(save + "mocap_frame_rate.npy", "");
                 zip.Save(save + "new.npz");*/
 
-        float fps = 120;
+/*        float fps = 120;
 
         // 创建一个单个浮点数
         double singleFloat = 59.99;
@@ -143,7 +143,7 @@ public class test : MonoBehaviour
             }
         }
 
-
+*/
         ///----------------------------------------------------------------
         /// Pack .npz methos
 
@@ -174,9 +174,20 @@ public class test : MonoBehaviour
 
         ///----------------------------------------------------------------
 */
+        Dictionary<string,NDArray> dic = new Dictionary<string,NDArray>();
 
+        NDArray a = new float[,] { {1,2,3}, {4,5,6}, { 7,8,9} };
+        dic["a"] = a;
+        var clone = dic["a"].Clone();
+        var copy = dic["a"].copy();
+        dic["clone"] = clone;
+        dic["copy"] = copy;
 
-
+        Debug.Log("copy dic: a[2]-a[1]");
+        dic["copy"][2] -= dic["copy"][1];
+        Debug.Log($"dic[\"a\"]: {dic["a"]}");
+        Debug.Log($"dic[\"clone\"]: {dic["clone"]}");
+        Debug.Log($"dic[\"copy\"]: {dic["copy"]}");
 
     }
 

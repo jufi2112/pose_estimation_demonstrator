@@ -10109,6 +10109,16 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   load_npz_success: 0
+  playing_timer: 0
+  playing_file_index: 0
+  continue_stop: 0
+  test_copy: 0
+  test_paste: 0
+  test_cut: 0
+  test_replace: 0
+  test_ori: 1
+  test_transAlign: 1
+  print_npz_files: 0
 --- !u!4 &1371523380
 Transform:
   m_ObjectHideFlags: 0

@@ -17,7 +17,6 @@ public class HideShowUI : MonoBehaviour
     {
         if(pressA_action != null)
         {
-            Debug.Log("--------------------pressA action not NULL.");
             pressA_action.action.performed += ToggleMenu;
         }
         PlayerBoard = GameObject.Find("PlayerBoard");
