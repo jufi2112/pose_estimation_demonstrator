@@ -238,9 +238,9 @@ class BodyPoseTcpClient:
                             break
                         poses_idx = 0
                     # Transform pose to Unity's coordinate system
-                    current_pose = self.poses[poses_idx]
-                    current_shape = self.shapes if self.single_shape_parameters else self.shapes[poses_idx]
-                    current_transl = self.transl[poses_idx]
+                    current_pose = self.poses[poses_idx].copy()
+                    current_shape = self.shapes.copy() if self.single_shape_parameters else self.shapes[poses_idx].copy()
+                    current_transl = self.transl[poses_idx].copy()
                     current_shape = self._adapt_betas_shape(current_shape)
                     if self.converter:
                         inp = DotMap({'trans': current_transl, 'betas': current_shape, 'poses': current_pose}, _dynamic=False)
